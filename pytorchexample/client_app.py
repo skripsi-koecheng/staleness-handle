@@ -1,0 +1,130 @@
+"""pytorchexample: A Flower / PyTorch app."""
+
+import time
+from logging import INFO
+
+import torch
+from flwr.app import ArrayRecord, Context, Message, MetricRecord, RecordDict
+from flwr.clientapp import ClientApp
+from flwr.common import log
+
+from pytorchexample.straggler import compute_straggler, describe_tier_mapping
+from pytorchexample.task import DistilBertAgNewsClassifier, load_data
+from pytorchexample.task import test as test_fn
+from pytorchexample.task import train as train_fn
+
+# Flower ClientApp
+app = ClientApp()
+
+
+@app.train()
+def train(msg: Message, context: Context):
+    """Train the model on local data."""
+
+    # Load the model and initialize it with the received weights
+    model = DistilBertAgNewsClassifier()
+    model.load_federated_state_dict(msg.content["arrays"].to_torch_state_dict())
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+
+    # Load the data
+    partition_id = context.node_config["partition-id"]
+    num_partitions = context.node_config["num-partitions"]
+    batch_size = context.run_config["batch-size"]
+    trainloader, _ = load_data(partition_id, num_partitions, batch_size)
+
+    # Train first and measure actual local training duration
+    train_start = time.perf_counter()
+    train_loss = train_fn(
+        model,
+        trainloader,
+        context.run_config["local-epochs"],
+        msg.content["config"]["lr"],
+        device,
+    )
+    train_duration = time.perf_counter() - train_start
+
+    # Optional deterministic straggler simulation
+    straggler_enabled = bool(context.run_config.get("straggler-enabled", False))
+    if straggler_enabled:
+        baseline_mode = str(context.run_config.get("baseline-mode", "measured"))
+        scenario = str(context.run_config.get("straggler-scenario", "balanced"))
+
+        if baseline_mode == "measured":
+            baseline_t = train_duration
+        else:
+            baseline_t = float(context.run_config.get("baseline-time-seconds", 60.0))
+
+        if partition_id == 0:
+            log(INFO, "[STRAGGLER] Tier map:\n%s", describe_tier_mapping(num_partitions, scenario))
+
+        sim = compute_straggler(
+            partition_id=partition_id,
+            total_clients=num_partitions,
+            scenario=scenario,
+            baseline_mode=baseline_mode,
+            baseline_T=baseline_t,
+            train_duration=train_duration,
+        )
+
+        log(
+            INFO,
+            "[STRAGGLER] partition=%d | scenario=%s | tier=%s | mult=%.1fx | mode=%s | T=%.2fs | train=%.2fs | target=%.2fs | sleep=%.2fs | total=%.2fs",
+            sim.partition_id,
+            sim.scenario,
+            sim.tier,
+            sim.multiplier,
+            sim.baseline_mode,
+            sim.baseline_T,
+            sim.train_duration,
+            sim.target_completion_time,
+            sim.sleep_duration,
+            sim.total_effective_time,
+        )
+
+        if sim.sleep_duration > 0:
+            time.sleep(sim.sleep_duration)
+
+    # Construct and return reply Message
+    model_record = ArrayRecord(model.get_federated_state_dict())
+    metrics = {
+        "train_loss": train_loss,
+        "num-examples": len(trainloader.dataset),
+    }
+    metric_record = MetricRecord(metrics)
+    content = RecordDict({"arrays": model_record, "metrics": metric_record})
+    return Message(content=content, reply_to=msg)
+
+
+@app.evaluate()
+def evaluate(msg: Message, context: Context):
+    """Evaluate the model on local data."""
+
+    # Load the model and initialize it with the received weights
+    model = DistilBertAgNewsClassifier()
+    model.load_federated_state_dict(msg.content["arrays"].to_torch_state_dict())
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+
+    # Load the data
+    partition_id = context.node_config["partition-id"]
+    num_partitions = context.node_config["num-partitions"]
+    batch_size = context.run_config["batch-size"]
+    _, valloader = load_data(partition_id, num_partitions, batch_size)
+
+    # Call the evaluation function
+    eval_loss, eval_acc = test_fn(
+        model,
+        valloader,
+        device,
+    )
+
+    # Construct and return reply Message
+    metrics = {
+        "eval_loss": eval_loss,
+        "eval_acc": eval_acc,
+        "num-examples": len(valloader.dataset),
+    }
+    metric_record = MetricRecord(metrics)
+    content = RecordDict({"metrics": metric_record})
+    return Message(content=content, reply_to=msg)
