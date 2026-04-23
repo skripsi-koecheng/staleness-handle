@@ -28,6 +28,9 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
         async_max_in_flight: int = 4,
         async_evaluate_interval: int = 1,
         async_buffer_size: int = 4,
+        lr_decay_interval: int = 20,
+        lr_decay_factor: float = 0.9,
+        min_learning_rate: float = 1e-4,
         staleness_weighting_enabled: bool = False,
         staleness_exponent: float = 1.0,
         **kwargs,
@@ -38,8 +41,34 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
         self.async_max_in_flight = max(1, async_max_in_flight)
         self.async_evaluate_interval = max(1, async_evaluate_interval)
         self.async_buffer_size = max(1, async_buffer_size)
+        self.lr_decay_interval = max(1, lr_decay_interval)
+        self.lr_decay_factor = min(1.0, max(0.0, lr_decay_factor))
+        self.min_learning_rate = max(0.0, min_learning_rate)
         self.staleness_weighting_enabled = staleness_weighting_enabled
         self.staleness_exponent = staleness_exponent
+
+    def _maybe_decay_lr(self, global_updates_done: int, train_config: ConfigRecord) -> None:
+        if global_updates_done <= 0 or global_updates_done % self.lr_decay_interval != 0:
+            return
+        if self.lr_decay_factor >= 1.0:
+            return
+
+        current_lr = float(train_config.get("lr", 0.0))
+        if current_lr <= self.min_learning_rate:
+            return
+
+        new_lr = max(self.min_learning_rate, current_lr * self.lr_decay_factor)
+        if new_lr >= current_lr:
+            return
+
+        train_config["lr"] = new_lr
+        log(
+            INFO,
+            "[ASYNC-BUFFERED] LR decayed at global update %s: %.6f -> %.6f",
+            global_updates_done,
+            current_lr,
+            new_lr,
+        )
 
     def _extract_train_reply(
         self,
@@ -66,17 +95,21 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
             return None, None, 0
 
         # valid_updates: (client_arrays, client_metrics, effective_weight, tau, staleness_weight)
-        valid_updates: list[tuple[ArrayRecord, MetricRecord, float, int, float]] = []
+        valid_updates: list[tuple[ArrayRecord,
+                                  MetricRecord, float, int, float]] = []
         for reply, tau in buffered_replies:
-            client_arrays, client_metrics, num_examples = self._extract_train_reply(reply)
+            client_arrays, client_metrics, num_examples = self._extract_train_reply(
+                reply)
             if client_arrays is not None and client_metrics is not None and num_examples > 0:
                 if self.staleness_weighting_enabled:
-                    sw = polynomial_staleness_weight(tau, self.staleness_exponent)
+                    sw = polynomial_staleness_weight(
+                        tau, self.staleness_exponent)
                     effective_weight = num_examples * sw
                 else:
                     sw = 1.0
                     effective_weight = num_examples
-                valid_updates.append((client_arrays, client_metrics, effective_weight, tau, sw))
+                valid_updates.append(
+                    (client_arrays, client_metrics, effective_weight, tau, sw))
 
         if not valid_updates:
             return None, None, 0
@@ -112,7 +145,8 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
 
         weighted_train_loss = 0.0
         for _, client_metrics, client_weight, _, _ in valid_updates:
-            weighted_train_loss += float(client_metrics.get("train_loss", 0.0)) * client_weight
+            weighted_train_loss += float(
+                client_metrics.get("train_loss", 0.0)) * client_weight
 
         metrics_dict: dict = {
             "train_loss": weighted_train_loss / total_weight,
@@ -120,8 +154,10 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
             "buffer_size": len(valid_updates),
         }
         if self.staleness_weighting_enabled:
-            metrics_dict["avg_tau"] = sum(t for _, _, _, t, _ in valid_updates) / len(valid_updates)
-            metrics_dict["avg_staleness_weight"] = sum(sw for _, _, _, _, sw in valid_updates) / len(valid_updates)
+            metrics_dict["avg_tau"] = sum(
+                t for _, _, _, t, _ in valid_updates) / len(valid_updates)
+            metrics_dict["avg_staleness_weight"] = sum(
+                sw for _, _, _, _, sw in valid_updates) / len(valid_updates)
 
         return ArrayRecord(aggregated_state), MetricRecord(metrics_dict), len(valid_updates)
 
@@ -139,20 +175,25 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
         if self.fraction_train == 0.0:
             return []
 
-        if server_round % 5 == 0 and server_round > 0:
-            config["lr"] *= 0.5
-            log(INFO, "LR decreased to: %s", config["lr"])
-
         excluded = set() if exclude_node_ids is None else exclude_node_ids
         available_node_ids = [
             node_id for node_id in grid.get_node_ids() if node_id not in excluded]
         if not available_node_ids:
             return []
 
-        num_to_sample = max(
+        fraction_target = max(
             1, int(len(available_node_ids) * self.fraction_train))
+        min_train_nodes = max(1, int(getattr(self, "min_train_nodes", 1)))
+        num_to_sample = max(fraction_target, min_train_nodes)
         num_to_sample = min(num_to_sample, len(available_node_ids))
         if max_nodes_to_sample is not None:
+            if max_nodes_to_sample < min_train_nodes:
+                log(
+                    INFO,
+                    "[ASYNC-BUFFERED] Sampling capped to %s (< min_train_nodes=%s)",
+                    max_nodes_to_sample,
+                    min_train_nodes,
+                )
             num_to_sample = min(num_to_sample, max_nodes_to_sample)
 
         import random
@@ -264,8 +305,13 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                         self.train_timeout is not None
                         and (time.monotonic() - last_progress) >= self.train_timeout
                     ):
-                        log(INFO, "[ASYNC-BUFFERED] Idle timeout reached.")
-                        break
+                        log(
+                            INFO,
+                            "[ASYNC-BUFFERED] Idle timeout reached with %s pending replies. Waiting for late clients.",
+                            len(pending_message_ids),
+                        )
+                        last_progress = time.monotonic()
+                        continue
                     time.sleep(self.reply_poll_interval)
                     continue
 
@@ -283,7 +329,8 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                     if client_arrays is None or client_metrics is None or client_weight <= 0:
                         continue
 
-                    dispatch_update = message_to_dispatch_update.pop(reply_to_message_id, 0)
+                    dispatch_update = message_to_dispatch_update.pop(
+                        reply_to_message_id, 0)
                     tau = global_updates_done - dispatch_update
                     buffered_replies.append((reply, tau))
                     log(
@@ -305,6 +352,8 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                             arrays = agg_arrays
                             result.arrays = agg_arrays
                             result.train_metrics_clientapp[global_updates_done] = agg_metrics
+                            self._maybe_decay_lr(
+                                global_updates_done, train_config)
                             wandb.log(dict(agg_metrics),
                                       step=global_updates_done)
                             log(
@@ -353,6 +402,7 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                     arrays = agg_arrays
                     result.arrays = agg_arrays
                     result.train_metrics_clientapp[global_updates_done] = agg_metrics
+                    self._maybe_decay_lr(global_updates_done, train_config)
                     wandb.log(dict(agg_metrics), step=global_updates_done)
 
                     if evaluate_fn is not None and global_updates_done % self.async_evaluate_interval == 0:

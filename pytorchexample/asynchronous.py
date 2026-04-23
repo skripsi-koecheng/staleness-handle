@@ -27,6 +27,9 @@ class AsyncFedAvgStrategy(FedAvg):
         reply_poll_interval: float = 1.0,
         async_max_in_flight: int = 4,
         async_evaluate_interval: int = 1,
+        lr_decay_interval: int = 20,
+        lr_decay_factor: float = 0.9,
+        min_learning_rate: float = 1e-4,
         staleness_weighting_enabled: bool = False,
         staleness_exponent: float = 1.0,
         **kwargs,
@@ -36,8 +39,34 @@ class AsyncFedAvgStrategy(FedAvg):
         self.reply_poll_interval = max(0.1, reply_poll_interval)
         self.async_max_in_flight = max(1, async_max_in_flight)
         self.async_evaluate_interval = max(1, async_evaluate_interval)
+        self.lr_decay_interval = max(1, lr_decay_interval)
+        self.lr_decay_factor = min(1.0, max(0.0, lr_decay_factor))
+        self.min_learning_rate = max(0.0, min_learning_rate)
         self.staleness_weighting_enabled = staleness_weighting_enabled
         self.staleness_exponent = staleness_exponent
+
+    def _maybe_decay_lr(self, updates_done: int, train_config: ConfigRecord) -> None:
+        if updates_done <= 0 or updates_done % self.lr_decay_interval != 0:
+            return
+        if self.lr_decay_factor >= 1.0:
+            return
+
+        current_lr = float(train_config.get("lr", 0.0))
+        if current_lr <= self.min_learning_rate:
+            return
+
+        new_lr = max(self.min_learning_rate, current_lr * self.lr_decay_factor)
+        if new_lr >= current_lr:
+            return
+
+        train_config["lr"] = new_lr
+        log(
+            INFO,
+            "[ASYNC] LR decayed at update %s: %.6f -> %.6f",
+            updates_done,
+            current_lr,
+            new_lr,
+        )
 
     @staticmethod
     def _weighted_average_state_dicts(
@@ -81,7 +110,8 @@ class AsyncFedAvgStrategy(FedAvg):
             return None, current_total_weight, None
 
         if self.staleness_weighting_enabled:
-            effective_weight = num_examples * polynomial_staleness_weight(tau, self.staleness_exponent)
+            effective_weight = num_examples * \
+                polynomial_staleness_weight(tau, self.staleness_exponent)
         else:
             effective_weight = num_examples
 
@@ -112,18 +142,25 @@ class AsyncFedAvgStrategy(FedAvg):
         if self.fraction_train == 0.0:
             return []
 
-        if server_round % 5 == 0 and server_round > 0:
-            config["lr"] *= 0.5
-            log(INFO, "LR decreased to: %s", config["lr"])
-
         excluded = set() if exclude_node_ids is None else exclude_node_ids
-        available_node_ids = [node_id for node_id in grid.get_node_ids() if node_id not in excluded]
+        available_node_ids = [
+            node_id for node_id in grid.get_node_ids() if node_id not in excluded]
         if not available_node_ids:
             return []
 
-        num_to_sample = max(1, int(len(available_node_ids) * self.fraction_train))
+        fraction_target = max(
+            1, int(len(available_node_ids) * self.fraction_train))
+        min_train_nodes = max(1, int(getattr(self, "min_train_nodes", 1)))
+        num_to_sample = max(fraction_target, min_train_nodes)
         num_to_sample = min(num_to_sample, len(available_node_ids))
         if max_nodes_to_sample is not None:
+            if max_nodes_to_sample < min_train_nodes:
+                log(
+                    INFO,
+                    "[ASYNC] Sampling capped to %s (< min_train_nodes=%s)",
+                    max_nodes_to_sample,
+                    min_train_nodes,
+                )
             num_to_sample = min(num_to_sample, max_nodes_to_sample)
 
         import random
@@ -131,7 +168,8 @@ class AsyncFedAvgStrategy(FedAvg):
         selected_node_ids = random.sample(available_node_ids, num_to_sample)
 
         config["server-round"] = server_round
-        record = RecordDict({self.arrayrecord_key: arrays, self.configrecord_key: config})
+        record = RecordDict({self.arrayrecord_key: arrays,
+                            self.configrecord_key: config})
         return self._construct_messages(record, selected_node_ids, MessageType.TRAIN)
 
     def _dispatch_messages(
@@ -170,7 +208,8 @@ class AsyncFedAvgStrategy(FedAvg):
         timeout: float = 3600,
         train_config: Optional[ConfigRecord] = None,
         evaluate_config: Optional[ConfigRecord] = None,
-        evaluate_fn: Optional[Callable[[int, ArrayRecord], Optional[MetricRecord]]] = None,
+        evaluate_fn: Optional[Callable[[int, ArrayRecord],
+                                       Optional[MetricRecord]]] = None,
     ) -> Result:
         del timeout
         del evaluate_config
@@ -178,7 +217,8 @@ class AsyncFedAvgStrategy(FedAvg):
         wandb.init(project=PROJECT_NAME)
 
         log(INFO, "Starting %s strategy:", self.__class__.__name__)
-        log_strategy_start_info(num_rounds, initial_arrays, train_config, ConfigRecord())
+        log_strategy_start_info(
+            num_rounds, initial_arrays, train_config, ConfigRecord())
         self.summary()
         log(INFO, "")
 
@@ -233,8 +273,13 @@ class AsyncFedAvgStrategy(FedAvg):
                         self.train_timeout is not None
                         and (time.monotonic() - last_progress) >= self.train_timeout
                     ):
-                        log(INFO, "[ASYNC] Idle timeout reached.")
-                        break
+                        log(
+                            INFO,
+                            "[ASYNC] Idle timeout reached with %s pending replies. Waiting for late clients.",
+                            len(pending_message_ids),
+                        )
+                        last_progress = time.monotonic()
+                        continue
                     time.sleep(self.reply_poll_interval)
                     continue
 
@@ -247,7 +292,8 @@ class AsyncFedAvgStrategy(FedAvg):
                     if node_id is not None:
                         pending_node_ids.discard(node_id)
 
-                    dispatch_update = message_to_dispatch_update.pop(reply_to_message_id, 0)
+                    dispatch_update = message_to_dispatch_update.pop(
+                        reply_to_message_id, 0)
                     tau = updates_done - dispatch_update
 
                     agg_arrays, weighted_examples_seen, train_metrics = self._apply_async_fedavg_update(
@@ -263,11 +309,14 @@ class AsyncFedAvgStrategy(FedAvg):
                     arrays = agg_arrays
                     result.arrays = agg_arrays
                     result.train_metrics_clientapp[updates_done] = train_metrics
+                    self._maybe_decay_lr(updates_done, train_config)
 
                     log_dict = dict(train_metrics)
                     if self.staleness_weighting_enabled:
-                        staleness_weight = polynomial_staleness_weight(tau, self.staleness_exponent)
-                        num_examples = float(train_metrics.get(self.weighted_by_key, 0.0))
+                        staleness_weight = polynomial_staleness_weight(
+                            tau, self.staleness_exponent)
+                        num_examples = float(
+                            train_metrics.get(self.weighted_by_key, 0.0))
                         final_weight = num_examples * staleness_weight
                         log(
                             INFO,
@@ -280,7 +329,8 @@ class AsyncFedAvgStrategy(FedAvg):
                             "final_weight": final_weight,
                         })
                     wandb.log(log_dict, step=updates_done)
-                    log(INFO, "[ASYNC UPDATE %s/%s] integrated reply from node %s", updates_done, target_updates, reply.metadata.src_node_id)
+                    log(INFO, "[ASYNC UPDATE %s/%s] integrated reply from node %s",
+                        updates_done, target_updates, reply.metadata.src_node_id)
 
                     if evaluate_fn is not None and updates_done % self.async_evaluate_interval == 0:
                         eval_res = evaluate_fn(updates_done, arrays)

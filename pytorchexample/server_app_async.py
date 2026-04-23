@@ -29,9 +29,20 @@ def main(grid: Grid, context: Context) -> None:
     async_evaluate_interval: int = context.run_config.get(
         "async-evaluate-interval", 4)
     async_buffer_size: int = context.run_config.get("async-buffer-size", 4)
+    min_train_nodes: int = int(context.run_config.get("min-train-nodes", 8))
+    min_evaluate_nodes: int = int(
+        context.run_config.get("min-evaluate-nodes", 8))
+    min_available_nodes: int = int(
+        context.run_config.get("min-available-nodes", 8))
     async_strategy: str = str(
         context.run_config.get("async-strategy", "immediate")
     ).lower()
+    lr_decay_interval: int = int(
+        context.run_config.get("lr-decay-interval", 20))
+    lr_decay_factor: float = float(
+        context.run_config.get("lr-decay-factor", 0.9))
+    min_learning_rate: float = float(
+        context.run_config.get("min-learning-rate", 1e-4))
     staleness_weighting_enabled: bool = bool(
         context.run_config.get("staleness-weighting-enabled", False)
     )
@@ -51,9 +62,12 @@ def main(grid: Grid, context: Context) -> None:
             async_max_in_flight=async_max_in_flight,
             async_evaluate_interval=async_evaluate_interval,
             async_buffer_size=async_buffer_size,
-            min_available_nodes=10,
-            min_train_nodes=10,
-            min_evaluate_nodes=10,
+            lr_decay_interval=lr_decay_interval,
+            lr_decay_factor=lr_decay_factor,
+            min_learning_rate=min_learning_rate,
+            min_available_nodes=min_available_nodes,
+            min_train_nodes=min_train_nodes,
+            min_evaluate_nodes=min_evaluate_nodes,
             staleness_weighting_enabled=staleness_weighting_enabled,
             staleness_exponent=staleness_exponent,
         )
@@ -65,9 +79,12 @@ def main(grid: Grid, context: Context) -> None:
             reply_poll_interval=reply_poll_interval,
             async_max_in_flight=async_max_in_flight,
             async_evaluate_interval=async_evaluate_interval,
-            min_available_nodes=10,
-            min_train_nodes=10,
-            min_evaluate_nodes=10,
+            lr_decay_interval=lr_decay_interval,
+            lr_decay_factor=lr_decay_factor,
+            min_learning_rate=min_learning_rate,
+            min_available_nodes=min_available_nodes,
+            min_train_nodes=min_train_nodes,
+            min_evaluate_nodes=min_evaluate_nodes,
             staleness_weighting_enabled=staleness_weighting_enabled,
             staleness_exponent=staleness_exponent,
         )

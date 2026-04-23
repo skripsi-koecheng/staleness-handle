@@ -77,23 +77,18 @@ Mode asynchronous dipilih dengan `async-strategy`:
 Contoh override config asynchronous immediate:
 
 ```bash
-flwr run . --stream --run-config "num-server-rounds=3 fraction-train=0.025 fraction-evaluate=0.05 local-epochs=1 learning-rate=0.1 batch-size=32 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 train-timeout-seconds=120.0 reply-poll-interval-seconds=2.0 async-max-in-flight=4 async-evaluate-interval=4 async-strategy='immediate' straggler-enabled=true straggler-scenario='balanced' baseline-mode='measured'"
+flwr run . --stream --run-config "num-server-rounds=3 fraction-train=0.025 fraction-evaluate=0.05 local-epochs=1 learning-rate=0.1 batch-size=32 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 train-timeout-seconds=600.0 reply-poll-interval-seconds=2.0 async-max-in-flight=4 async-evaluate-interval=4 async-strategy='immediate' straggler-enabled=true straggler-scenario='balanced' baseline-mode='measured'"
 ```
 
 Contoh override config asynchronous buffered:
 
 ```bash
-flwr run . --stream --run-config "num-server-rounds=3 fraction-train=0.025 fraction-evaluate=0.05 local-epochs=1 learning-rate=0.1 batch-size=32 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 train-timeout-seconds=120.0 reply-poll-interval-seconds=2.0 async-max-in-flight=4 async-evaluate-interval=4 async-strategy='buffered' async-buffer-size=4 straggler-enabled=true straggler-scenario='slow_dominant' baseline-mode='fixed' baseline-time-seconds=60.0"
+flwr run . --stream --run-config "num-server-rounds=3 fraction-train=0.025 fraction-evaluate=0.05 local-epochs=1 learning-rate=0.1 batch-size=32 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 train-timeout-seconds=600.0 reply-poll-interval-seconds=2.0 async-max-in-flight=4 async-evaluate-interval=4 async-strategy='buffered' async-buffer-size=4 straggler-enabled=true straggler-scenario='slow_dominant' baseline-mode='fixed' baseline-time-seconds=60.0"
 ```
 
 ## Penjelasan Konfigurasi
 
 Konfigurasi aktif dibaca dari `tool.flwr.app.config` pada `pyproject.toml`.
-Preset referensi ada di:
-
-- `tool.pytorchexample.config.synchronous`
-- `tool.pytorchexample.config.asynchronous`
-- `tool.pytorchexample.config.asynchronous-buffered`
 
 Arti masing-masing parameter:
 
@@ -139,11 +134,11 @@ Pada mode buffered, rata-rata `avg_tau` dan `avg_staleness_weight` dari seluruh 
 Contoh override config asynchronous immediate dengan staleness weighting:
 
 ```bash
-flwr run . --stream --run-config "num-server-rounds=3 fraction-train=0.025 fraction-evaluate=0.05 local-epochs=1 learning-rate=0.1 batch-size=32 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 train-timeout-seconds=120.0 reply-poll-interval-seconds=2.0 async-max-in-flight=4 async-evaluate-interval=4 async-strategy='immediate' staleness-weighting-enabled=true staleness-exponent=0.5 straggler-enabled=true straggler-scenario='balanced' baseline-mode='measured'"
+flwr run . --stream --run-config "num-server-rounds=3 fraction-train=0.025 fraction-evaluate=0.05 local-epochs=1 learning-rate=0.1 batch-size=32 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 train-timeout-seconds=600.0 reply-poll-interval-seconds=2.0 async-max-in-flight=4 async-evaluate-interval=4 async-strategy='immediate' staleness-weighting-enabled=true staleness-exponent=0.5 straggler-enabled=true straggler-scenario='balanced' baseline-mode='measured'"
 ```
 
 Contoh override config asynchronous buffered dengan staleness weighting:
 
 ```bash
-flwr run . --stream --run-config "num-server-rounds=3 fraction-train=0.025 fraction-evaluate=0.05 local-epochs=1 learning-rate=0.1 batch-size=32 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 train-timeout-seconds=120.0 reply-poll-interval-seconds=2.0 async-max-in-flight=4 async-evaluate-interval=4 async-strategy='buffered' async-buffer-size=4 staleness-weighting-enabled=true staleness-exponent=0.5 straggler-enabled=true straggler-scenario='slow_dominant' baseline-mode='fixed' baseline-time-seconds=60.0"
+flwr run . --stream --run-config "num-server-rounds=3 fraction-train=0.025 fraction-evaluate=0.05 local-epochs=1 learning-rate=0.1 batch-size=32 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 train-timeout-seconds=600.0 reply-poll-interval-seconds=2.0 async-max-in-flight=4 async-evaluate-interval=4 async-strategy='buffered' async-buffer-size=4 staleness-weighting-enabled=true staleness-exponent=0.5 straggler-enabled=true straggler-scenario='slow_dominant' baseline-mode='fixed' baseline-time-seconds=60.0"
 ```
