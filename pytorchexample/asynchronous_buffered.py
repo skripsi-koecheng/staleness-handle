@@ -31,6 +31,8 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
         lr_decay_interval: int = 20,
         lr_decay_factor: float = 0.9,
         min_learning_rate: float = 1e-4,
+        staleness_weighting_mode: str = "fedstaleweight",
+        fedstaleweight_ema_beta: float = 0.8,
         staleness_weighting_enabled: bool = False,
         staleness_exponent: float = 1.0,
         **kwargs,
@@ -44,8 +46,13 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
         self.lr_decay_interval = max(1, lr_decay_interval)
         self.lr_decay_factor = min(1.0, max(0.0, lr_decay_factor))
         self.min_learning_rate = max(0.0, min_learning_rate)
+        self.staleness_weighting_mode = str(
+            staleness_weighting_mode).strip().lower()
+        self.fedstaleweight_ema_beta = min(
+            0.99, max(0.0, fedstaleweight_ema_beta))
         self.staleness_weighting_enabled = staleness_weighting_enabled
         self.staleness_exponent = staleness_exponent
+        self.client_staleness_ema: dict[int, float] = {}
 
     def _maybe_decay_lr(self, global_updates_done: int, train_config: ConfigRecord) -> None:
         if global_updates_done <= 0 or global_updates_done % self.lr_decay_interval != 0:
@@ -87,29 +94,47 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
 
         return client_arrays, client_metrics, client_weight
 
+    def _update_staleness_ema(self, node_id: int, tau: int) -> float:
+        previous = self.client_staleness_ema.get(node_id, float(tau))
+        updated = (
+            self.fedstaleweight_ema_beta * previous
+            + (1.0 - self.fedstaleweight_ema_beta) * float(tau)
+        )
+        self.client_staleness_ema[node_id] = updated
+        return updated
+
     def _aggregate_buffered_replies(
         self,
-        buffered_replies: list[tuple[Message, int]],
+        buffered_replies: list[tuple[Message, int, float]],
     ) -> tuple[Optional[ArrayRecord], Optional[MetricRecord], int]:
         if not buffered_replies:
             return None, None, 0
 
-        # valid_updates: (client_arrays, client_metrics, effective_weight, tau, staleness_weight)
+        # valid_updates: (client_arrays, client_metrics, effective_weight, expected_staleness, fairness_boost)
         valid_updates: list[tuple[ArrayRecord,
-                                  MetricRecord, float, int, float]] = []
-        for reply, tau in buffered_replies:
+                                  MetricRecord, float, float, float]] = []
+        for reply, tau, expected_staleness in buffered_replies:
             client_arrays, client_metrics, num_examples = self._extract_train_reply(
                 reply)
             if client_arrays is not None and client_metrics is not None and num_examples > 0:
                 if self.staleness_weighting_enabled:
-                    sw = polynomial_staleness_weight(
-                        tau, self.staleness_exponent)
-                    effective_weight = num_examples * sw
+                    if self.staleness_weighting_mode in {"fedstaleweight", "fair"}:
+                        fairness_boost = 1.0 + \
+                            (max(0.0, expected_staleness) /
+                             max(1, self.async_buffer_size))
+                    elif self.staleness_weighting_mode in {"polynomial", "poly"}:
+                        fairness_boost = polynomial_staleness_weight(
+                            tau, self.staleness_exponent)
+                    else:
+                        raise ValueError(
+                            "Invalid staleness-weighting-mode. Use 'polynomial' or 'fedstaleweight'."
+                        )
+                    effective_weight = num_examples * fairness_boost
                 else:
-                    sw = 1.0
+                    fairness_boost = 1.0
                     effective_weight = num_examples
                 valid_updates.append(
-                    (client_arrays, client_metrics, effective_weight, tau, sw))
+                    (client_arrays, client_metrics, effective_weight, expected_staleness, fairness_boost))
 
         if not valid_updates:
             return None, None, 0
@@ -154,9 +179,9 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
             "buffer_size": len(valid_updates),
         }
         if self.staleness_weighting_enabled:
-            metrics_dict["avg_tau"] = sum(
+            metrics_dict["avg_expected_staleness"] = sum(
                 t for _, _, _, t, _ in valid_updates) / len(valid_updates)
-            metrics_dict["avg_staleness_weight"] = sum(
+            metrics_dict["avg_fairness_boost"] = sum(
                 sw for _, _, _, _, sw in valid_updates) / len(valid_updates)
 
         return ArrayRecord(aggregated_state), MetricRecord(metrics_dict), len(valid_updates)
@@ -275,7 +300,7 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
             pending_node_ids: set[int] = set()
             message_to_node: dict[str, int] = {}
             message_to_dispatch_update: dict[str, int] = {}
-            buffered_replies: list[tuple[Message, int]] = []
+            buffered_replies: list[tuple[Message, int, float]] = []
             global_updates_done = 0
 
             initial_dispatch = self._dispatch_messages(
@@ -332,12 +357,15 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                     dispatch_update = message_to_dispatch_update.pop(
                         reply_to_message_id, 0)
                     tau = global_updates_done - dispatch_update
-                    buffered_replies.append((reply, tau))
+                    expected_staleness = self._update_staleness_ema(
+                        node_id if node_id is not None else reply.metadata.src_node_id, tau)
+                    buffered_replies.append((reply, tau, expected_staleness))
                     log(
                         INFO,
-                        "[ASYNC-BUFFERED] buffered reply from node %s tau=%d (%s/%s)",
+                        "[ASYNC-BUFFERED] buffered reply from node %s tau=%d ema=%.3f (%s/%s)",
                         reply.metadata.src_node_id,
                         tau,
+                        expected_staleness,
                         len(buffered_replies),
                         self.async_buffer_size,
                     )

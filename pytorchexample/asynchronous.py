@@ -30,6 +30,8 @@ class AsyncFedAvgStrategy(FedAvg):
         lr_decay_interval: int = 20,
         lr_decay_factor: float = 0.9,
         min_learning_rate: float = 1e-4,
+        staleness_weighting_mode: str = "polynomial",
+        fedstaleweight_ema_beta: float = 0.8,
         staleness_weighting_enabled: bool = False,
         staleness_exponent: float = 1.0,
         **kwargs,
@@ -42,8 +44,13 @@ class AsyncFedAvgStrategy(FedAvg):
         self.lr_decay_interval = max(1, lr_decay_interval)
         self.lr_decay_factor = min(1.0, max(0.0, lr_decay_factor))
         self.min_learning_rate = max(0.0, min_learning_rate)
+        self.staleness_weighting_mode = str(
+            staleness_weighting_mode).strip().lower()
+        self.fedstaleweight_ema_beta = min(
+            0.99, max(0.0, fedstaleweight_ema_beta))
         self.staleness_weighting_enabled = staleness_weighting_enabled
         self.staleness_exponent = staleness_exponent
+        self.client_staleness_ema: dict[int, float] = {}
 
     def _maybe_decay_lr(self, updates_done: int, train_config: ConfigRecord) -> None:
         if updates_done <= 0 or updates_done % self.lr_decay_interval != 0:
@@ -66,6 +73,41 @@ class AsyncFedAvgStrategy(FedAvg):
             updates_done,
             current_lr,
             new_lr,
+        )
+
+    def _update_staleness_ema(self, node_id: int, tau: int) -> float:
+        previous = self.client_staleness_ema.get(node_id, float(tau))
+        updated = (
+            self.fedstaleweight_ema_beta * previous
+            + (1.0 - self.fedstaleweight_ema_beta) * float(tau)
+        )
+        self.client_staleness_ema[node_id] = updated
+        return updated
+
+    def _compute_effective_weight(
+        self,
+        *,
+        node_id: int,
+        tau: int,
+        num_examples: float,
+    ) -> tuple[float, float]:
+        if not self.staleness_weighting_enabled:
+            return num_examples, 1.0
+
+        mode = self.staleness_weighting_mode
+        if mode in {"fedstaleweight", "fair"}:
+            expected_staleness = self._update_staleness_ema(node_id, tau)
+            fairness_boost = 1.0 + \
+                (max(0.0, expected_staleness) / max(1, self.async_max_in_flight))
+            return num_examples * fairness_boost, fairness_boost
+
+        if mode in {"polynomial", "poly"}:
+            fairness_boost = polynomial_staleness_weight(
+                tau, self.staleness_exponent)
+            return num_examples * fairness_boost, fairness_boost
+
+        raise ValueError(
+            "Invalid staleness-weighting-mode. Use 'polynomial' or 'fedstaleweight'."
         )
 
     @staticmethod
@@ -96,6 +138,7 @@ class AsyncFedAvgStrategy(FedAvg):
         current_arrays: ArrayRecord,
         current_total_weight: float,
         reply: Message,
+        node_id: int,
         tau: int = 0,
     ) -> tuple[Optional[ArrayRecord], float, Optional[MetricRecord]]:
         if not reply.has_content():
@@ -109,13 +152,17 @@ class AsyncFedAvgStrategy(FedAvg):
         if num_examples <= 0:
             return None, current_total_weight, None
 
-        if self.staleness_weighting_enabled:
-            effective_weight = num_examples * \
-                polynomial_staleness_weight(tau, self.staleness_exponent)
-        else:
-            effective_weight = num_examples
+        effective_weight, staleness_boost = self._compute_effective_weight(
+            node_id=node_id,
+            tau=tau,
+            num_examples=num_examples,
+        )
 
         if current_total_weight <= 0:
+            if self.staleness_weighting_enabled:
+                client_metrics = MetricRecord(
+                    {**client_metrics, "staleness_boost": staleness_boost}
+                )
             return client_arrays, effective_weight, client_metrics
 
         current_state = current_arrays.to_torch_state_dict()
@@ -126,6 +173,10 @@ class AsyncFedAvgStrategy(FedAvg):
             client_state,
             effective_weight,
         )
+        if self.staleness_weighting_enabled:
+            client_metrics = MetricRecord(
+                {**client_metrics, "staleness_boost": staleness_boost}
+            )
         return ArrayRecord(merged_state), current_total_weight + effective_weight, client_metrics
 
     def configure_train(
@@ -300,6 +351,7 @@ class AsyncFedAvgStrategy(FedAvg):
                         arrays,
                         weighted_examples_seen,
                         reply,
+                        node_id=node_id if node_id is not None else reply.metadata.src_node_id,
                         tau=tau,
                     )
                     if agg_arrays is None or train_metrics is None:
@@ -313,19 +365,19 @@ class AsyncFedAvgStrategy(FedAvg):
 
                     log_dict = dict(train_metrics)
                     if self.staleness_weighting_enabled:
-                        staleness_weight = polynomial_staleness_weight(
-                            tau, self.staleness_exponent)
                         num_examples = float(
                             train_metrics.get(self.weighted_by_key, 0.0))
-                        final_weight = num_examples * staleness_weight
+                        staleness_boost = float(
+                            train_metrics.get("staleness_boost", 1.0))
+                        final_weight = num_examples * staleness_boost
                         log(
                             INFO,
-                            "[STALENESS] tau=%d staleness_weight=%.4f final_weight=%.2f",
-                            tau, staleness_weight, final_weight,
+                            "[STALENESS] mode=%s tau=%d staleness_boost=%.4f final_weight=%.2f",
+                            self.staleness_weighting_mode, tau, staleness_boost, final_weight,
                         )
                         log_dict.update({
                             "tau": tau,
-                            "staleness_weight": staleness_weight,
+                            "staleness_weight": staleness_boost,
                             "final_weight": final_weight,
                         })
                     wandb.log(log_dict, step=updates_done)

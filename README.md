@@ -90,6 +90,23 @@ flwr run . --stream --run-config "num-server-rounds=3 fraction-train=0.025 fract
 
 Konfigurasi aktif dibaca dari `tool.flwr.app.config` pada `pyproject.toml`.
 
+### Preset Eksekusi: Laptop vs Super VM
+
+Untuk memudahkan, gunakan dua preset berikut.
+
+| Preset | Tujuan | Rekomendasi Kunci |
+| --- | --- | --- |
+| `Laptop-safe` | Stabil dulu di perangkat lokal | `async-max-in-flight=2`, `batch-size=16`, `min-*-nodes=2`, `straggler-enabled=false` |
+| `Super-VM` | Throughput tinggi saat resource besar tersedia | `async-max-in-flight=8..16`, `batch-size=32..64`, `min-*-nodes>=8`, `straggler-enabled=true` |
+
+Default `pyproject.toml` saat ini sudah di-set ke preset `Laptop-safe`.
+
+Contoh override untuk preset `Super-VM` (nanti saat VM siap):
+
+```bash
+flwr run . --stream --run-config "num-server-rounds=12 fraction-train=0.025 fraction-evaluate=0.05 local-epochs=1 learning-rate=0.02 batch-size=32 min-train-nodes=8 min-evaluate-nodes=8 min-available-nodes=8 async-strategy='immediate' async-max-in-flight=8 async-evaluate-interval=1 straggler-enabled=true straggler-scenario='balanced' baseline-mode='measured' train-timeout-seconds=600.0"
+```
+
 Arti masing-masing parameter:
 
 - `num-server-rounds`: jumlah round global (atau target round logis pada async).
@@ -111,12 +128,42 @@ Arti masing-masing parameter:
 - `straggler-scenario`: distribusi tier straggler (`balanced`, `slow_dominant`, `fast_dominant`).
 - `baseline-mode`: mode baseline waktu (`measured` memakai train time lokal client, `fixed` memakai nilai konstan).
 - `baseline-time-seconds`: baseline waktu konstan saat `baseline-mode='fixed'`.
-- `staleness-weighting-enabled`: aktif/nonaktif polynomial staleness weighting pada mode asynchronous (default `false`).
-- `staleness-exponent`: eksponen alpha pada formula staleness weight (default `1.0`).
+- `staleness-weighting-enabled`: aktif/nonaktif staleness-aware weighting pada mode asynchronous.
+- `staleness-weighting-mode`: mode weighting (`polynomial`, `fedstaleweight`, atau alias `fair`).
+- `staleness-exponent`: eksponen alpha untuk mode `polynomial`.
+- `fedstaleweight-ema-beta`: faktor EMA untuk estimasi expected staleness pada mode `fedstaleweight`.
+
+## Tabel Skenario Straggler (FAST/MEDIUM/SLOW)
+
+Tier straggler ditentukan deterministik dari `partition_id` dan menggunakan multiplier berikut:
+
+| Tier | Multiplier Waktu Target | Interpretasi |
+| --- | --- | --- |
+| FAST | x1.0 | Klien cepat, target selesai sekitar baseline `T` |
+| MEDIUM | x1.5 | Klien menengah, target selesai sekitar `1.5T` |
+| SLOW | x3.0 | Klien lambat, target selesai sekitar `3.0T` |
+
+Distribusi tier per nilai `straggler-scenario`:
+
+| `straggler-scenario` | FAST | MEDIUM | SLOW |
+| --- | --- | --- | --- |
+| `balanced` | 33% | 33% | 34% (sisa) |
+| `slow_dominant` | 20% | 10% | 70% (sisa) |
+| `fast_dominant` | 70% | 20% | 10% (sisa) |
+
+Catatan:
+
+- Jumlah aktual klien per tier dihitung dengan pembulatan (`round`) untuk FAST dan MEDIUM, sedangkan SLOW mengambil sisa klien.
+- Untuk 100 klien, kira-kira menjadi: `balanced=33/33/34`, `slow_dominant=20/10/70`, `fast_dominant=70/20/10`.
 
 ## Staleness-Aware Weighting (Async Only)
 
-Ketika `staleness-weighting-enabled=true`, setiap update client diberi bobot yang lebih kecil jika reply-nya sudah "basi" (terlambat). Formula:
+Ketika `staleness-weighting-enabled=true`, bobot update client dihitung berdasarkan mode yang dipilih:
+
+- `staleness-weighting-mode='polynomial'`: penalti staleness klasik.
+- `staleness-weighting-mode='fedstaleweight'` (atau `fair`): fairness boost berbasis expected staleness (EMA).
+
+Formula mode `polynomial`:
 
 ```
 tau               = updates_done_at_receive - updates_done_at_dispatch
@@ -129,7 +176,7 @@ final_weight      = num_examples * staleness_weight
 - `alpha` diatur lewat `staleness-exponent`. Nilai lebih besar = penalti lebih besar terhadap update yang basi.
 
 Pada mode immediate, `tau` dan `staleness_weight` dilog per-update ke Flower log dan W&B.
-Pada mode buffered, rata-rata `avg_tau` dan `avg_staleness_weight` dari seluruh buffer dilog ke W&B per agregasi.
+Pada mode buffered, rata-rata `avg_expected_staleness` dan `avg_fairness_boost` dari seluruh buffer dilog ke W&B per agregasi.
 
 Contoh override config asynchronous immediate dengan staleness weighting:
 

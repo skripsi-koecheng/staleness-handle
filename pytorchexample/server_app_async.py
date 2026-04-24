@@ -43,6 +43,17 @@ def main(grid: Grid, context: Context) -> None:
         context.run_config.get("lr-decay-factor", 0.9))
     min_learning_rate: float = float(
         context.run_config.get("min-learning-rate", 1e-4))
+    default_staleness_mode = (
+        "fedstaleweight"
+        if async_strategy in {"buffered", "buffer"}
+        else "polynomial"
+    )
+    staleness_weighting_mode: str = str(
+        context.run_config.get(
+            "staleness-weighting-mode", default_staleness_mode)
+    ).lower()
+    fedstaleweight_ema_beta: float = float(
+        context.run_config.get("fedstaleweight-ema-beta", 0.8))
     staleness_weighting_enabled: bool = bool(
         context.run_config.get("staleness-weighting-enabled", False)
     )
@@ -65,6 +76,8 @@ def main(grid: Grid, context: Context) -> None:
             lr_decay_interval=lr_decay_interval,
             lr_decay_factor=lr_decay_factor,
             min_learning_rate=min_learning_rate,
+            staleness_weighting_mode=staleness_weighting_mode,
+            fedstaleweight_ema_beta=fedstaleweight_ema_beta,
             min_available_nodes=min_available_nodes,
             min_train_nodes=min_train_nodes,
             min_evaluate_nodes=min_evaluate_nodes,
@@ -82,6 +95,8 @@ def main(grid: Grid, context: Context) -> None:
             lr_decay_interval=lr_decay_interval,
             lr_decay_factor=lr_decay_factor,
             min_learning_rate=min_learning_rate,
+            staleness_weighting_mode=staleness_weighting_mode,
+            fedstaleweight_ema_beta=fedstaleweight_ema_beta,
             min_available_nodes=min_available_nodes,
             min_train_nodes=min_train_nodes,
             min_evaluate_nodes=min_evaluate_nodes,
