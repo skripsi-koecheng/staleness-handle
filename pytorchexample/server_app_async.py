@@ -49,6 +49,9 @@ def main(grid: Grid, context: Context) -> None:
     staleness_exponent: float = float(
         context.run_config.get("staleness-exponent", 1.0)
     )
+    target_accuracy: float = float(
+        context.run_config.get("target-accuracy", 0.20)
+    )
 
     global_model = DistilBertAgNewsClassifier()
     arrays = ArrayRecord(global_model.get_federated_state_dict())
@@ -70,6 +73,7 @@ def main(grid: Grid, context: Context) -> None:
             min_evaluate_nodes=min_evaluate_nodes,
             staleness_weighting_enabled=staleness_weighting_enabled,
             staleness_exponent=staleness_exponent,
+            target_accuracy=target_accuracy,
         )
     elif async_strategy in {"immediate", "plain"}:
         strategy = AsyncFedAvgStrategy(

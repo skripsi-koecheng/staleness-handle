@@ -33,6 +33,7 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
         min_learning_rate: float = 1e-4,
         staleness_weighting_enabled: bool = False,
         staleness_exponent: float = 1.0,
+        target_accuracy: float = 0.20,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
@@ -46,6 +47,12 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
         self.min_learning_rate = max(0.0, min_learning_rate)
         self.staleness_weighting_enabled = staleness_weighting_enabled
         self.staleness_exponent = staleness_exponent
+        
+        # Tracking metrics for target accuracy
+        self.target_accuracy = target_accuracy
+        self.total_client_trips = 0
+        self.start_time = time.time()
+        self.target_reached = False
 
     def _maybe_decay_lr(self, global_updates_done: int, train_config: ConfigRecord) -> None:
         if global_updates_done <= 0 or global_updates_done % self.lr_decay_interval != 0:
@@ -69,6 +76,59 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
             current_lr,
             new_lr,
         )
+
+    def _check_target_accuracy(
+        self,
+        eval_metrics: Optional[MetricRecord],
+        global_updates_done: int,
+    ) -> None:
+        """Check if target accuracy has been reached and log metrics if so.
+        
+        Args:
+            eval_metrics: The evaluation metrics from global_evaluate_fn.
+            global_updates_done: The current global update number.
+        """
+        if eval_metrics is None or self.target_reached:
+            return
+        
+        # Extract accuracy from eval_metrics (supports 'accuracy' or similar keys)
+        accuracy = None
+        for key in ["accuracy", "acc", "test_accuracy", "eval_accuracy"]:
+            if key in eval_metrics:
+                accuracy = float(eval_metrics.get(key, 0.0))
+                break
+        
+        if accuracy is None:
+            return
+        
+        if accuracy >= self.target_accuracy:
+            self.target_reached = True
+            elapsed_time = time.time() - self.start_time
+            
+            # Log to wandb and console
+            metrics_to_log = {
+                "target_accuracy_reached": True,
+                "wall_clock_time_to_target": elapsed_time,
+                "client_trips_to_target": self.total_client_trips,
+                "global_update_at_target": global_updates_done,
+                "final_accuracy": accuracy,
+            }
+            
+            log(
+                INFO,
+                "[ASYNC-BUFFERED] 🎯 TARGET ACCURACY REACHED! "
+                "Accuracy: %.4f (target: %.4f) | "
+                "Client Trips: %d | "
+                "Wall-Clock Time: %.2f seconds | "
+                "Global Updates: %d",
+                accuracy,
+                self.target_accuracy,
+                self.total_client_trips,
+                elapsed_time,
+                global_updates_done,
+            )
+            
+            wandb.log(metrics_to_log, step=global_updates_done)
 
     def _extract_train_reply(
         self,
@@ -270,6 +330,8 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                 log(INFO, "Initial global evaluation results: %s", initial_res)
                 if initial_res is not None:
                     result.evaluate_metrics_serverapp[0] = initial_res
+                    # Check if target accuracy is already reached
+                    self._check_target_accuracy(initial_res, 0)
 
             pending_message_ids: set[str] = set()
             pending_node_ids: set[int] = set()
@@ -333,13 +395,18 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                         reply_to_message_id, 0)
                     tau = global_updates_done - dispatch_update
                     buffered_replies.append((reply, tau))
+                    
+                    # Increment client trips counter
+                    self.total_client_trips += 1
+                    
                     log(
                         INFO,
-                        "[ASYNC-BUFFERED] buffered reply from node %s tau=%d (%s/%s)",
+                        "[ASYNC-BUFFERED] buffered reply from node %s tau=%d (%s/%s) [Client Trips: %d]",
                         reply.metadata.src_node_id,
                         tau,
                         len(buffered_replies),
                         self.async_buffer_size,
+                        self.total_client_trips,
                     )
 
                     if len(buffered_replies) >= self.async_buffer_size:
@@ -372,6 +439,8 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                                     result.evaluate_metrics_serverapp[global_updates_done] = eval_res
                                     wandb.log(dict(eval_res),
                                               step=global_updates_done)
+                                    # Check if target accuracy has been reached
+                                    self._check_target_accuracy(eval_res, global_updates_done)
 
                             if global_updates_done >= max(1, num_rounds):
                                 break
@@ -411,6 +480,8 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                         if eval_res is not None:
                             result.evaluate_metrics_serverapp[global_updates_done] = eval_res
                             wandb.log(dict(eval_res), step=global_updates_done)
+                            # Check if target accuracy has been reached
+                            self._check_target_accuracy(eval_res, global_updates_done)
 
             log(INFO, "")
             log(INFO, "Strategy execution finished in %.2fs", time.time() - t_start)
