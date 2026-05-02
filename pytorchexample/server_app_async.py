@@ -5,7 +5,12 @@ from flwr.serverapp import Grid, ServerApp
 
 from pytorchexample.asynchronous import AsyncFedAvgStrategy
 from pytorchexample.asynchronous_buffered import AsyncBufferedFedAvgStrategy
-from pytorchexample.task import DistilBertAgNewsClassifier, global_evaluate
+from pytorchexample.task import (
+    DistilBertAgNewsClassifier,
+    global_evaluate,
+    set_global_seed,
+    GLOBAL_MODEL_SEED,
+)
 
 app = ServerApp()
 
@@ -61,6 +66,8 @@ def main(grid: Grid, context: Context) -> None:
         context.run_config.get("staleness-exponent", 1.0)
     )
 
+    # Seed before creating global model for deterministic initialization
+    set_global_seed(GLOBAL_MODEL_SEED)
     global_model = DistilBertAgNewsClassifier()
     arrays = ArrayRecord(global_model.get_federated_state_dict())
 

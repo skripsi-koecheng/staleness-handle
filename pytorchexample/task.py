@@ -12,6 +12,9 @@ from peft import (
     set_peft_model_state_dict,
 )
 from torch.utils.data import DataLoader
+import os
+import random
+import numpy as np
 from transformers import (
     AutoModelForSequenceClassification,
     AutoTokenizer,
@@ -32,6 +35,27 @@ tokenizer = None
 
 TEXT_CANDIDATE_KEYS = ["text", "sentence", "content", "article", "description"]
 LABEL_CANDIDATE_KEYS = ["label", "labels", "class", "category", "topic"]
+
+# Global seed for deterministic runs
+GLOBAL_MODEL_SEED = 42
+
+
+def set_global_seed(seed: int):
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+
+def seed_worker(worker_id):
+    worker_seed = GLOBAL_MODEL_SEED + worker_id
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
+    torch.manual_seed(worker_seed)
 
 
 class DistilBertAgNewsClassifier(nn.Module):
@@ -78,8 +102,10 @@ def _collate_batch(batch):
     tok = _get_tokenizer()
 
     sample = batch[0]
-    text_key = next((key for key in TEXT_CANDIDATE_KEYS if key in sample), None)
-    label_key = next((key for key in LABEL_CANDIDATE_KEYS if key in sample), None)
+    text_key = next(
+        (key for key in TEXT_CANDIDATE_KEYS if key in sample), None)
+    label_key = next(
+        (key for key in LABEL_CANDIDATE_KEYS if key in sample), None)
 
     if "title" in sample and "description" in sample:
         texts = [f"{item['title']} {item['description']}" for item in batch]
@@ -97,7 +123,8 @@ def _collate_batch(batch):
             f"Available keys: {list(sample.keys())}"
         )
 
-    labels = torch.tensor([int(item[label_key]) for item in batch], dtype=torch.long)
+    labels = torch.tensor([int(item[label_key])
+                          for item in batch], dtype=torch.long)
     if labels.min().item() >= 1 and labels.max().item() == NUM_LABELS:
         labels = labels - 1
 
@@ -129,17 +156,26 @@ def load_data(partition_id: int, num_partitions: int, batch_size: int):
             partitioners={"train": partitioner},
         )
     partition = fds.load_partition(partition_id)
-    partition_train_test = partition.train_test_split(test_size=0.2, seed=42)
+    partition_train_test = partition.train_test_split(
+        test_size=0.2, seed=GLOBAL_MODEL_SEED + partition_id
+    )
+    gen = torch.Generator()
+    gen.manual_seed(GLOBAL_MODEL_SEED + partition_id)
+
     trainloader = DataLoader(
         partition_train_test["train"],
         batch_size=batch_size,
         shuffle=True,
         collate_fn=_collate_batch,
+        generator=gen,
+        worker_init_fn=seed_worker,
     )
     testloader = DataLoader(
         partition_train_test["test"],
         batch_size=batch_size,
         collate_fn=_collate_batch,
+        generator=gen,
+        worker_init_fn=seed_worker,
     )
     return trainloader, testloader
 
@@ -225,6 +261,7 @@ def test(net, testloader, device):
 
 def global_evaluate(server_round: int, arrays: ArrayRecord) -> MetricRecord:
     """Evaluate model on centralized AG News test data."""
+    set_global_seed(GLOBAL_MODEL_SEED)
     model = DistilBertAgNewsClassifier()
     model.load_federated_state_dict(arrays.to_torch_state_dict())
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")

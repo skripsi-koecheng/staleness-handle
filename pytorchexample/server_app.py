@@ -2,7 +2,12 @@ from flwr.app import ArrayRecord, ConfigRecord, Context
 from flwr.serverapp import Grid, ServerApp
 
 from pytorchexample.synchronous import SynchronousStrategy
-from pytorchexample.task import DistilBertAgNewsClassifier, global_evaluate
+from pytorchexample.task import (
+    DistilBertAgNewsClassifier,
+    global_evaluate,
+    set_global_seed,
+    GLOBAL_MODEL_SEED,
+)
 
 # Create ServerApp
 app = ServerApp()
@@ -24,10 +29,13 @@ def main(grid: Grid, context: Context) -> None:
     min_learning_rate: float = float(
         context.run_config.get("min-learning-rate", 1e-4))
     min_train_nodes: int = int(context.run_config.get("min-train-nodes", 10))
-    min_evaluate_nodes: int = int(context.run_config.get("min-evaluate-nodes", 10))
-    min_available_nodes: int = int(context.run_config.get("min-available-nodes", 10))
+    min_evaluate_nodes: int = int(
+        context.run_config.get("min-evaluate-nodes", 10))
+    min_available_nodes: int = int(
+        context.run_config.get("min-available-nodes", 10))
 
-    # Load global model
+    # Load global model (seeded for deterministic initialization)
+    set_global_seed(GLOBAL_MODEL_SEED)
     global_model = DistilBertAgNewsClassifier()
     arrays = ArrayRecord(global_model.get_federated_state_dict())
 

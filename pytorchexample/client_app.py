@@ -9,7 +9,12 @@ from flwr.clientapp import ClientApp
 from flwr.common import log
 
 from pytorchexample.straggler import compute_straggler, describe_tier_mapping
-from pytorchexample.task import DistilBertAgNewsClassifier, load_data
+from pytorchexample.task import (
+    DistilBertAgNewsClassifier,
+    load_data,
+    set_global_seed,
+    GLOBAL_MODEL_SEED,
+)
 from pytorchexample.task import test as test_fn
 from pytorchexample.task import train as train_fn
 
@@ -22,8 +27,12 @@ def train(msg: Message, context: Context):
     """Train the model on local data."""
 
     # Load the model and initialize it with the received weights
+    partition_id = context.node_config["partition-id"]
+    # Seed deterministically per client partition
+    set_global_seed(GLOBAL_MODEL_SEED + partition_id)
     model = DistilBertAgNewsClassifier()
-    model.load_federated_state_dict(msg.content["arrays"].to_torch_state_dict())
+    model.load_federated_state_dict(
+        msg.content["arrays"].to_torch_state_dict())
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model.to(device)
 
@@ -45,18 +54,23 @@ def train(msg: Message, context: Context):
     train_duration = time.perf_counter() - train_start
 
     # Optional deterministic straggler simulation
-    straggler_enabled = bool(context.run_config.get("straggler-enabled", False))
+    straggler_enabled = bool(
+        context.run_config.get("straggler-enabled", False))
     if straggler_enabled:
-        baseline_mode = str(context.run_config.get("baseline-mode", "measured"))
-        scenario = str(context.run_config.get("straggler-scenario", "balanced"))
+        baseline_mode = str(context.run_config.get(
+            "baseline-mode", "measured"))
+        scenario = str(context.run_config.get(
+            "straggler-scenario", "balanced"))
 
         if baseline_mode == "measured":
             baseline_t = train_duration
         else:
-            baseline_t = float(context.run_config.get("baseline-time-seconds", 60.0))
+            baseline_t = float(context.run_config.get(
+                "baseline-time-seconds", 60.0))
 
         if partition_id == 0:
-            log(INFO, "[STRAGGLER] Tier map:\n%s", describe_tier_mapping(num_partitions, scenario))
+            log(INFO, "[STRAGGLER] Tier map:\n%s",
+                describe_tier_mapping(num_partitions, scenario))
 
         sim = compute_straggler(
             partition_id=partition_id,
@@ -101,8 +115,12 @@ def evaluate(msg: Message, context: Context):
     """Evaluate the model on local data."""
 
     # Load the model and initialize it with the received weights
+    partition_id = context.node_config["partition-id"]
+    # Seed deterministically per client partition
+    set_global_seed(GLOBAL_MODEL_SEED + partition_id)
     model = DistilBertAgNewsClassifier()
-    model.load_federated_state_dict(msg.content["arrays"].to_torch_state_dict())
+    model.load_federated_state_dict(
+        msg.content["arrays"].to_torch_state_dict())
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model.to(device)
 

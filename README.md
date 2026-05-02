@@ -94,10 +94,10 @@ Konfigurasi aktif dibaca dari `tool.flwr.app.config` pada `pyproject.toml`.
 
 Untuk memudahkan, gunakan dua preset berikut.
 
-| Preset | Tujuan | Rekomendasi Kunci |
-| --- | --- | --- |
-| `Laptop-safe` | Stabil dulu di perangkat lokal | `async-max-in-flight=2`, `batch-size=16`, `min-*-nodes=2`, `straggler-enabled=false` |
-| `Super-VM` | Throughput tinggi saat resource besar tersedia | `async-max-in-flight=8..16`, `batch-size=32..64`, `min-*-nodes>=8`, `straggler-enabled=true` |
+| Preset        | Tujuan                                         | Rekomendasi Kunci                                                                            |
+| ------------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `Laptop-safe` | Stabil dulu di perangkat lokal                 | `async-max-in-flight=2`, `batch-size=16`, `min-*-nodes=2`, `straggler-enabled=false`         |
+| `Super-VM`    | Throughput tinggi saat resource besar tersedia | `async-max-in-flight=8..16`, `batch-size=32..64`, `min-*-nodes>=8`, `straggler-enabled=true` |
 
 Default `pyproject.toml` saat ini sudah di-set ke preset `Laptop-safe`.
 
@@ -137,19 +137,19 @@ Arti masing-masing parameter:
 
 Tier straggler ditentukan deterministik dari `partition_id` dan menggunakan multiplier berikut:
 
-| Tier | Multiplier Waktu Target | Interpretasi |
-| --- | --- | --- |
-| FAST | x1.0 | Klien cepat, target selesai sekitar baseline `T` |
-| MEDIUM | x1.5 | Klien menengah, target selesai sekitar `1.5T` |
-| SLOW | x3.0 | Klien lambat, target selesai sekitar `3.0T` |
+| Tier   | Multiplier Waktu Target | Interpretasi                                     |
+| ------ | ----------------------- | ------------------------------------------------ |
+| FAST   | x1.0                    | Klien cepat, target selesai sekitar baseline `T` |
+| MEDIUM | x1.5                    | Klien menengah, target selesai sekitar `1.5T`    |
+| SLOW   | x3.0                    | Klien lambat, target selesai sekitar `3.0T`      |
 
 Distribusi tier per nilai `straggler-scenario`:
 
-| `straggler-scenario` | FAST | MEDIUM | SLOW |
-| --- | --- | --- | --- |
-| `balanced` | 33% | 33% | 34% (sisa) |
-| `slow_dominant` | 20% | 10% | 70% (sisa) |
-| `fast_dominant` | 70% | 20% | 10% (sisa) |
+| `straggler-scenario` | FAST | MEDIUM | SLOW       |
+| -------------------- | ---- | ------ | ---------- |
+| `balanced`           | 33%  | 33%    | 34% (sisa) |
+| `slow_dominant`      | 20%  | 10%    | 70% (sisa) |
+| `fast_dominant`      | 70%  | 20%    | 10% (sisa) |
 
 Catatan:
 
@@ -189,3 +189,107 @@ Contoh override config asynchronous buffered dengan staleness weighting:
 ```bash
 flwr run . --stream --run-config "num-server-rounds=3 fraction-train=0.025 fraction-evaluate=0.05 local-epochs=1 learning-rate=0.1 batch-size=32 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 train-timeout-seconds=600.0 reply-poll-interval-seconds=2.0 async-max-in-flight=4 async-evaluate-interval=4 async-strategy='buffered' async-buffer-size=4 staleness-weighting-enabled=true staleness-exponent=0.5 straggler-enabled=true straggler-scenario='slow_dominant' baseline-mode='fixed' baseline-time-seconds=60.0"
 ```
+
+## Config Template untuk Perbandingan Fair: Immediate vs Buffered
+
+Untuk membandingkan step-0 accuracy dengan **config identik** (hanya strategy dan weighting mode berbeda), gunakan template berikut.
+
+### Template 1: Async Immediate (Polynomial Staleness Weighting)
+
+**File: `pyproject.toml` atau CLI override**
+
+```toml
+[tool.flwr.app.config]
+num-server-rounds = 5
+fraction-train = 0.005
+fraction-evaluate = 0.01
+local-epochs = 1
+learning-rate = 0.003
+lr-decay-interval = 20
+lr-decay-factor = 0.9
+min-learning-rate = 0.0001
+min-train-nodes = 1
+min-evaluate-nodes = 1
+min-available-nodes = 1
+batch-size = 8
+weight-decay = 0.01
+warmup-ratio = 0.1
+max-grad-norm = 1.0
+train-timeout-seconds = 180.0
+reply-poll-interval-seconds = 2.0
+async-max-in-flight = 1
+async-evaluate-interval = 1
+async-strategy = "immediate"
+async-buffer-size = 4
+straggler-enabled = false
+straggler-scenario = "balanced"
+baseline-mode = "fixed"
+baseline-time-seconds = 30.0
+staleness-weighting-enabled = false
+staleness-weighting-mode = "polynomial"
+staleness-exponent = 0.5
+fedstaleweight-ema-beta = 0.8
+```
+
+**CLI command:**
+
+```bash
+flwr run . --stream --run-config "num-server-rounds=5 fraction-train=0.005 fraction-evaluate=0.01 local-epochs=1 learning-rate=0.003 lr-decay-interval=20 lr-decay-factor=0.9 min-learning-rate=0.0001 min-train-nodes=1 min-evaluate-nodes=1 min-available-nodes=1 batch-size=8 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 train-timeout-seconds=180.0 reply-poll-interval-seconds=2.0 async-max-in-flight=1 async-evaluate-interval=1 async-strategy='immediate' async-buffer-size=4 straggler-enabled=false straggler-scenario='balanced' baseline-mode='fixed' baseline-time-seconds=30.0 staleness-weighting-enabled=false staleness-weighting-mode='polynomial' staleness-exponent=0.5 fedstaleweight-ema-beta=0.8"
+```
+
+### Template 2: Async Buffered (FedStaleWeight Fairness Weighting)
+
+**File: `pyproject.toml` atau CLI override**
+
+```toml
+[tool.flwr.app.config]
+num-server-rounds = 5
+fraction-train = 0.005
+fraction-evaluate = 0.01
+local-epochs = 1
+learning-rate = 0.003
+lr-decay-interval = 20
+lr-decay-factor = 0.9
+min-learning-rate = 0.0001
+min-train-nodes = 1
+min-evaluate-nodes = 1
+min-available-nodes = 1
+batch-size = 8
+weight-decay = 0.01
+warmup-ratio = 0.1
+max-grad-norm = 1.0
+train-timeout-seconds = 180.0
+reply-poll-interval-seconds = 2.0
+async-max-in-flight = 1
+async-evaluate-interval = 1
+async-strategy = "buffered"
+async-buffer-size = 4
+straggler-enabled = false
+straggler-scenario = "balanced"
+baseline-mode = "fixed"
+baseline-time-seconds = 30.0
+staleness-weighting-enabled = false
+staleness-weighting-mode = "fedstaleweight"
+staleness-exponent = 0.5
+fedstaleweight-ema-beta = 0.8
+```
+
+**CLI command:**
+
+```bash
+flwr run . --stream --run-config "num-server-rounds=5 fraction-train=0.005 fraction-evaluate=0.01 local-epochs=1 learning-rate=0.003 lr-decay-interval=20 lr-decay-factor=0.9 min-learning-rate=0.0001 min-train-nodes=1 min-evaluate-nodes=1 min-available-nodes=1 batch-size=8 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 train-timeout-seconds=180.0 reply-poll-interval-seconds=2.0 async-max-in-flight=1 async-evaluate-interval=1 async-strategy='buffered' async-buffer-size=4 straggler-enabled=false straggler-scenario='balanced' baseline-mode='fixed' baseline-time-seconds=30.0 staleness-weighting-enabled=false staleness-weighting-mode='fedstaleweight' staleness-exponent=0.5 fedstaleweight-ema-beta=0.8"
+```
+
+### Perbedaan Kunci
+
+| Parameter                  | Immediate (Poly) | Buffered (FedStaleWeight) |
+| -------------------------- | ---------------- | ------------------------- |
+| `async-strategy`           | `"immediate"`    | `"buffered"`              |
+| `staleness-weighting-mode` | `"polynomial"`   | `"fedstaleweight"`        |
+| **Semua config lainnya**   | **Identik**      | **Identik**               |
+
+**Catatan:**
+
+- Kedua template memiliki config identik kecuali `async-strategy` dan `staleness-weighting-mode`.
+- Jalankan kedua mode dengan config identik pada **environment yang sama** (local atau VM) untuk perbandingan fair.
+- Step-0 accuracy seharusnya **identik atau sangat dekat** jika tidak ada update yang diterapkan sebelum evaluasi awal.
