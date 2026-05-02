@@ -15,6 +15,9 @@ from torch.utils.data import DataLoader
 import os
 import random
 import numpy as np
+from logging import INFO
+
+from flwr.common import log
 from transformers import (
     AutoModelForSequenceClassification,
     AutoTokenizer,
@@ -268,4 +271,16 @@ def global_evaluate(server_round: int, arrays: ArrayRecord) -> MetricRecord:
     model.to(device)
     test_dataloader = load_centralized_dataset()
     test_loss, test_acc = test(model, test_dataloader, device)
-    return MetricRecord({"accuracy": test_acc, "loss": test_loss})
+    log(
+        INFO,
+        "[GLOBAL][ROUND %s] Top-1 Test Accuracy=%.4f | Test Loss=%.4f",
+        server_round,
+        test_acc,
+        test_loss,
+    )
+    return MetricRecord(
+        {
+            "top1_test_accuracy": test_acc,
+            "test_loss": test_loss,
+        }
+    )
