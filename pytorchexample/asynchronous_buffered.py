@@ -13,6 +13,7 @@ from flwr.serverapp.strategy import FedAvg, Result
 from flwr.serverapp.strategy.strategy_utils import log_strategy_start_info
 
 from pytorchexample.staleness import polynomial_staleness_weight
+from pytorchexample.task import get_top1_test_accuracy
 
 PROJECT_NAME = "FLOWER-advanced-pytorch"
 
@@ -269,6 +270,8 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
         evaluate_config: Optional[ConfigRecord] = None,
         evaluate_fn: Optional[Callable[[int, ArrayRecord],
                                        Optional[MetricRecord]]] = None,
+        stop_mode: str = "num_rounds",
+        target_accuracy: float = 0.9,
     ) -> Result:
         del timeout
         del evaluate_config
@@ -284,17 +287,46 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
         train_config = ConfigRecord() if train_config is None else train_config
         result = Result()
         result.arrays = initial_arrays
+        target_mode = str(stop_mode).strip().lower() in {
+            "target_accuracy",
+            "target-accuracy",
+            "target",
+        }
+        evaluation_interval = 1 if target_mode else self.async_evaluate_interval
+
+        def log_target_metrics(step: int, client_trips: int) -> None:
+            wall_clock_seconds = time.time() - t_start
+            log(
+                INFO,
+                "[TARGET] Top-1 Test Accuracy reached: target=%.4f | client_trips=%d | wall_clock=%.2fs",
+                target_accuracy,
+                client_trips,
+                wall_clock_seconds,
+            )
+            wandb.log(
+                {
+                    "number_of_client_trips_to_target_accuracy": client_trips,
+                    "wall_clock_time_to_target_accuracy": wall_clock_seconds,
+                },
+                step=step,
+            )
 
         try:
             t_start = time.time()
             arrays = initial_arrays
             next_server_round = 1
+            client_trips_done = 0
 
             if evaluate_fn is not None:
                 initial_res = evaluate_fn(0, arrays)
                 log(INFO, "Initial global evaluation results: %s", initial_res)
                 if initial_res is not None:
                     result.evaluate_metrics_serverapp[0] = initial_res
+                    if target_mode:
+                        accuracy = get_top1_test_accuracy(initial_res)
+                        if accuracy is not None and accuracy >= target_accuracy:
+                            log_target_metrics(0, client_trips_done)
+                            return result
 
             pending_message_ids: set[str] = set()
             pending_node_ids: set[int] = set()
@@ -377,6 +409,7 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
 
                         if agg_arrays is not None and agg_metrics is not None and consumed > 0:
                             global_updates_done += 1
+                            client_trips_done += consumed
                             arrays = agg_arrays
                             result.arrays = agg_arrays
                             result.train_metrics_clientapp[global_updates_done] = agg_metrics
@@ -392,7 +425,7 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                                 consumed,
                             )
 
-                            if evaluate_fn is not None and global_updates_done % self.async_evaluate_interval == 0:
+                            if evaluate_fn is not None and global_updates_done % evaluation_interval == 0:
                                 eval_res = evaluate_fn(
                                     global_updates_done, arrays)
                                 log(INFO, "\t└──> MetricRecord: %s", eval_res)
@@ -400,6 +433,13 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                                     result.evaluate_metrics_serverapp[global_updates_done] = eval_res
                                     wandb.log(dict(eval_res),
                                               step=global_updates_done)
+                                    if target_mode:
+                                        accuracy = get_top1_test_accuracy(
+                                            eval_res)
+                                        if accuracy is not None and accuracy >= target_accuracy:
+                                            log_target_metrics(
+                                                global_updates_done, client_trips_done)
+                                            return result
 
                             if global_updates_done >= max(1, num_rounds):
                                 break
@@ -427,18 +467,25 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                     buffered_replies)
                 if agg_arrays is not None and agg_metrics is not None and consumed > 0:
                     global_updates_done += 1
+                    client_trips_done += consumed
                     arrays = agg_arrays
                     result.arrays = agg_arrays
                     result.train_metrics_clientapp[global_updates_done] = agg_metrics
                     self._maybe_decay_lr(global_updates_done, train_config)
                     wandb.log(dict(agg_metrics), step=global_updates_done)
 
-                    if evaluate_fn is not None and global_updates_done % self.async_evaluate_interval == 0:
+                    if evaluate_fn is not None and global_updates_done % evaluation_interval == 0:
                         eval_res = evaluate_fn(global_updates_done, arrays)
                         log(INFO, "\t└──> MetricRecord: %s", eval_res)
                         if eval_res is not None:
                             result.evaluate_metrics_serverapp[global_updates_done] = eval_res
                             wandb.log(dict(eval_res), step=global_updates_done)
+                            if target_mode:
+                                accuracy = get_top1_test_accuracy(eval_res)
+                                if accuracy is not None and accuracy >= target_accuracy:
+                                    log_target_metrics(
+                                        global_updates_done, client_trips_done)
+                                    return result
 
             log(INFO, "")
             log(INFO, "Strategy execution finished in %.2fs", time.time() - t_start)

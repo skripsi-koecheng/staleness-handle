@@ -22,6 +22,9 @@ def main(grid: Grid, context: Context) -> None:
     fraction_evaluate: float = context.run_config["fraction-evaluate"]
     fraction_train: float = context.run_config["fraction-train"]
     num_rounds: int = context.run_config["num-server-rounds"]
+    stop_mode: str = str(context.run_config.get("stop-mode", "num_rounds"))
+    target_accuracy: float = float(
+        context.run_config.get("target-accuracy", 0.9))
     lr: float = context.run_config["learning-rate"]
     weight_decay: float = context.run_config.get("weight-decay", 0.01)
     warmup_ratio: float = context.run_config.get("warmup-ratio", 0.1)
@@ -128,4 +131,6 @@ def main(grid: Grid, context: Context) -> None:
         ),
         num_rounds=num_rounds,
         evaluate_fn=global_evaluate,
+        stop_mode=stop_mode,
+        target_accuracy=target_accuracy,
     )

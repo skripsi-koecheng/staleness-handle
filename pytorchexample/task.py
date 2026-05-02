@@ -16,6 +16,7 @@ import os
 import random
 import numpy as np
 from logging import INFO
+from typing import Optional
 
 from flwr.common import log
 from transformers import (
@@ -38,6 +39,7 @@ tokenizer = None
 
 TEXT_CANDIDATE_KEYS = ["text", "sentence", "content", "article", "description"]
 LABEL_CANDIDATE_KEYS = ["label", "labels", "class", "category", "topic"]
+TOP1_TEST_ACCURACY_KEY = "top1_test_accuracy"
 
 # Global seed for deterministic runs
 GLOBAL_MODEL_SEED = 42
@@ -262,6 +264,13 @@ def test(net, testloader, device):
     return loss, accuracy
 
 
+def get_top1_test_accuracy(metrics: MetricRecord) -> Optional[float]:
+    value = metrics.get(TOP1_TEST_ACCURACY_KEY)
+    if value is None:
+        return None
+    return float(value)
+
+
 def global_evaluate(server_round: int, arrays: ArrayRecord) -> MetricRecord:
     """Evaluate model on centralized AG News test data."""
     set_global_seed(GLOBAL_MODEL_SEED)
@@ -270,17 +279,11 @@ def global_evaluate(server_round: int, arrays: ArrayRecord) -> MetricRecord:
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model.to(device)
     test_dataloader = load_centralized_dataset()
-    test_loss, test_acc = test(model, test_dataloader, device)
+    _, test_acc = test(model, test_dataloader, device)
     log(
         INFO,
-        "[GLOBAL][ROUND %s] Top-1 Test Accuracy=%.4f | Test Loss=%.4f",
+        "[GLOBAL][ROUND %s] Top-1 Test Accuracy=%.4f",
         server_round,
         test_acc,
-        test_loss,
     )
-    return MetricRecord(
-        {
-            "top1_test_accuracy": test_acc,
-            "test_loss": test_loss,
-        }
-    )
+    return MetricRecord({TOP1_TEST_ACCURACY_KEY: test_acc})

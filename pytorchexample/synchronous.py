@@ -11,6 +11,8 @@ from flwr.serverapp import Grid
 from flwr.serverapp.strategy import FedAdagrad, Result
 from flwr.serverapp.strategy.strategy_utils import log_strategy_start_info
 
+from pytorchexample.task import get_top1_test_accuracy
+
 PROJECT_NAME = "flower-async-staleness"
 
 
@@ -67,6 +69,8 @@ class SynchronousStrategy(FedAdagrad):
         evaluate_fn: Optional[
             Callable[[int, ArrayRecord], Optional[MetricRecord]]
         ] = None,
+        stop_mode: str = "num_rounds",
+        target_accuracy: float = 0.9,
     ) -> Result:
         """Execute the federated learning strategy while logging results to W&B."""
 
@@ -84,15 +88,43 @@ class SynchronousStrategy(FedAdagrad):
         train_config = ConfigRecord() if train_config is None else train_config
         evaluate_config = ConfigRecord() if evaluate_config is None else evaluate_config
         result = Result()
+        target_mode = str(stop_mode).strip().lower() in {
+            "target_accuracy",
+            "target-accuracy",
+            "target",
+        }
+
+        def log_target_metrics(step: int, client_trips: int) -> None:
+            wall_clock_seconds = time.time() - t_start
+            log(
+                INFO,
+                "[TARGET] Top-1 Test Accuracy reached: target=%.4f | client_trips=%d | wall_clock=%.2fs",
+                target_accuracy,
+                client_trips,
+                wall_clock_seconds,
+            )
+            wandb.log(
+                {
+                    "number_of_client_trips_to_target_accuracy": client_trips,
+                    "wall_clock_time_to_target_accuracy": wall_clock_seconds,
+                },
+                step=step,
+            )
 
         try:
             t_start = time.time()
+            client_trips_done = 0
             # Evaluate starting global parameters
             if evaluate_fn:
                 res = evaluate_fn(0, initial_arrays)
                 log(INFO, "Initial global evaluation results: %s", res)
                 if res is not None:
                     result.evaluate_metrics_serverapp[0] = res
+                    if target_mode:
+                        accuracy = get_top1_test_accuracy(res)
+                        if accuracy is not None and accuracy >= target_accuracy:
+                            log_target_metrics(0, client_trips_done)
+                            return result
 
             arrays = initial_arrays
 
@@ -106,7 +138,7 @@ class SynchronousStrategy(FedAdagrad):
 
                 # Call strategy to configure training round
                 # Send messages and wait for replies
-                train_replies = grid.send_and_receive(
+                train_replies = list(grid.send_and_receive(
                     messages=self.configure_train(
                         current_round,
                         arrays,
@@ -114,7 +146,7 @@ class SynchronousStrategy(FedAdagrad):
                         grid,
                     ),
                     timeout=timeout,
-                )
+                ))
 
                 # Aggregate train
                 agg_arrays, agg_train_metrics = self.aggregate_train(
@@ -131,6 +163,7 @@ class SynchronousStrategy(FedAdagrad):
                     result.train_metrics_clientapp[current_round] = agg_train_metrics
                     # Log to W&B
                     wandb.log(dict(agg_train_metrics), step=current_round)
+                    client_trips_done += len(train_replies)
 
                 # -----------------------------------------------------------------
                 # --- EVALUATION (CLIENTAPP-SIDE) ---------------------------------
@@ -156,7 +189,8 @@ class SynchronousStrategy(FedAdagrad):
 
                 # Log training metrics and append to history
                 if agg_evaluate_metrics is not None:
-                    log(INFO, "\t└──> Aggregated MetricRecord: %s", agg_evaluate_metrics)
+                    log(INFO, "\t└──> Aggregated MetricRecord: %s",
+                        agg_evaluate_metrics)
                     result.evaluate_metrics_clientapp[current_round] = agg_evaluate_metrics
                     # Log to W&B
                     wandb.log(dict(agg_evaluate_metrics), step=current_round)
@@ -173,6 +207,12 @@ class SynchronousStrategy(FedAdagrad):
                         result.evaluate_metrics_serverapp[current_round] = res
                         # Log to W&B
                         wandb.log(dict(res), step=current_round)
+                        if target_mode:
+                            accuracy = get_top1_test_accuracy(res)
+                            if accuracy is not None and accuracy >= target_accuracy:
+                                log_target_metrics(
+                                    current_round, client_trips_done)
+                                return result
 
             log(INFO, "")
             log(INFO, "Strategy execution finished in %.2fs", time.time() - t_start)

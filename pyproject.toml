@@ -28,6 +28,8 @@ clientapp = "pytorchexample.client_app_async:app"
 
 [tool.flwr.app.config]
 num-server-rounds = 5
+stop-mode = "num_rounds"
+target-accuracy = 0.90
 fraction-train = 0.005
 fraction-evaluate = 0.01
 local-epochs = 1
