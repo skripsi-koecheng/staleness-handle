@@ -13,7 +13,11 @@ from flwr.serverapp.strategy import FedAvg, Result
 from flwr.serverapp.strategy.strategy_utils import log_strategy_start_info
 
 from pytorchexample.staleness import polynomial_staleness_weight
-from pytorchexample.task import get_top1_test_accuracy
+from pytorchexample.task import (
+    compute_direction_variation,
+    extract_lora_state,
+    get_top1_test_accuracy,
+)
 
 PROJECT_NAME = "FLOWER-advanced-pytorch"
 
@@ -316,6 +320,9 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
             arrays = initial_arrays
             next_server_round = 1
             client_trips_done = 0
+            previous_lora_state = extract_lora_state(
+                initial_arrays.to_torch_state_dict()
+            )
 
             if evaluate_fn is not None:
                 initial_res = evaluate_fn(0, arrays)
@@ -415,8 +422,18 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                             result.train_metrics_clientapp[global_updates_done] = agg_metrics
                             self._maybe_decay_lr(
                                 global_updates_done, train_config)
-                            wandb.log(dict(agg_metrics),
-                                      step=global_updates_done)
+                            current_state = arrays.to_torch_state_dict()
+                            direction_variation = compute_direction_variation(
+                                current_state,
+                                previous_lora_state,
+                            )
+                            previous_lora_state = extract_lora_state(
+                                current_state)
+
+                            log_dict = dict(agg_metrics)
+                            if direction_variation is not None:
+                                log_dict["direction_variation"] = direction_variation
+                            wandb.log(log_dict, step=global_updates_done)
                             log(
                                 INFO,
                                 "[ASYNC-BUFFERED AGG %s/%s] applied buffered FedAvg with %s replies",
@@ -472,7 +489,17 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                     result.arrays = agg_arrays
                     result.train_metrics_clientapp[global_updates_done] = agg_metrics
                     self._maybe_decay_lr(global_updates_done, train_config)
-                    wandb.log(dict(agg_metrics), step=global_updates_done)
+                    current_state = arrays.to_torch_state_dict()
+                    direction_variation = compute_direction_variation(
+                        current_state,
+                        previous_lora_state,
+                    )
+                    previous_lora_state = extract_lora_state(current_state)
+
+                    log_dict = dict(agg_metrics)
+                    if direction_variation is not None:
+                        log_dict["direction_variation"] = direction_variation
+                    wandb.log(log_dict, step=global_updates_done)
 
                     if evaluate_fn is not None and global_updates_done % evaluation_interval == 0:
                         eval_res = evaluate_fn(global_updates_done, arrays)

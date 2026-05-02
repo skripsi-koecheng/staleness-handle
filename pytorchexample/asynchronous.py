@@ -13,7 +13,11 @@ from flwr.serverapp.strategy import FedAvg, Result
 from flwr.serverapp.strategy.strategy_utils import log_strategy_start_info
 
 from pytorchexample.staleness import polynomial_staleness_weight
-from pytorchexample.task import get_top1_test_accuracy
+from pytorchexample.task import (
+    compute_direction_variation,
+    extract_lora_state,
+    get_top1_test_accuracy,
+)
 
 PROJECT_NAME = "FLOWER-advanced-pytorch"
 
@@ -308,6 +312,9 @@ class AsyncFedAvgStrategy(FedAvg):
             arrays = initial_arrays
             weighted_examples_seen = 0.0
             client_trips_done = 0
+            previous_lora_state = extract_lora_state(
+                initial_arrays.to_torch_state_dict()
+            )
 
             if evaluate_fn is not None:
                 initial_res = evaluate_fn(0, arrays)
@@ -396,7 +403,16 @@ class AsyncFedAvgStrategy(FedAvg):
                     result.train_metrics_clientapp[updates_done] = train_metrics
                     self._maybe_decay_lr(updates_done, train_config)
 
+                    current_state = arrays.to_torch_state_dict()
+                    direction_variation = compute_direction_variation(
+                        current_state,
+                        previous_lora_state,
+                    )
+                    previous_lora_state = extract_lora_state(current_state)
+
                     log_dict = dict(train_metrics)
+                    if direction_variation is not None:
+                        log_dict["direction_variation"] = direction_variation
                     if self.staleness_weighting_enabled:
                         num_examples = float(
                             train_metrics.get(self.weighted_by_key, 0.0))

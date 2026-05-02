@@ -3,6 +3,7 @@ import torch.nn as nn
 from datasets import load_dataset
 from flwr.app import ArrayRecord, MetricRecord
 from flwr_datasets import FederatedDataset
+import torch.nn.functional as F
 from flwr_datasets.partitioner import IidPartitioner
 from peft import (
     LoraConfig,
@@ -40,6 +41,7 @@ tokenizer = None
 TEXT_CANDIDATE_KEYS = ["text", "sentence", "content", "article", "description"]
 LABEL_CANDIDATE_KEYS = ["label", "labels", "class", "category", "topic"]
 TOP1_TEST_ACCURACY_KEY = "top1_test_accuracy"
+DIR_VARIATION_KEY = "direction_variation"
 
 # Global seed for deterministic runs
 GLOBAL_MODEL_SEED = 42
@@ -269,6 +271,62 @@ def get_top1_test_accuracy(metrics: MetricRecord) -> Optional[float]:
     if value is None:
         return None
     return float(value)
+
+
+def _is_lora_tensor(name: str, tensor: torch.Tensor) -> bool:
+    return (
+        tensor.ndim == 2
+        and tensor.is_floating_point()
+        and ("lora_A" in name or "lora_B" in name)
+    )
+
+
+def _average_column_cosine_similarity(
+    current_state: dict[str, torch.Tensor],
+    previous_state: dict[str, torch.Tensor],
+) -> Optional[float]:
+    similarities: list[float] = []
+    for name, current_tensor in current_state.items():
+        previous_tensor = previous_state.get(name)
+        if previous_tensor is None or current_tensor.shape != previous_tensor.shape:
+            continue
+        if not _is_lora_tensor(name, current_tensor):
+            continue
+
+        for column_idx in range(current_tensor.shape[1]):
+            current_column = current_tensor[:, column_idx].float().reshape(-1)
+            previous_column = previous_tensor[:,
+                                              column_idx].float().reshape(-1)
+            similarity = F.cosine_similarity(
+                current_column,
+                previous_column,
+                dim=0,
+                eps=1e-8,
+            )
+            similarities.append(float(similarity.item()))
+
+    if not similarities:
+        return None
+    return sum(similarities) / len(similarities)
+
+
+def extract_lora_state(
+    state_dict: dict[str, torch.Tensor],
+) -> dict[str, torch.Tensor]:
+    return {
+        name: tensor.detach().cpu().clone()
+        for name, tensor in state_dict.items()
+        if _is_lora_tensor(name, tensor)
+    }
+
+
+def compute_direction_variation(
+    current_state: dict[str, torch.Tensor],
+    previous_state: Optional[dict[str, torch.Tensor]],
+) -> Optional[float]:
+    if previous_state is None:
+        return None
+    return _average_column_cosine_similarity(current_state, previous_state)
 
 
 def global_evaluate(server_round: int, arrays: ArrayRecord) -> MetricRecord:

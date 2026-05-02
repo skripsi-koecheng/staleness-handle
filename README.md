@@ -110,6 +110,8 @@ flwr run . --stream --run-config "num-server-rounds=12 fraction-train=0.025 frac
 Arti masing-masing parameter:
 
 - `num-server-rounds`: jumlah round global (atau target round logis pada async).
+- `stop-mode`: `num_rounds` (default) atau `target_accuracy` untuk berhenti saat akurasi tercapai.
+- `target-accuracy`: ambang Top-1 Test Accuracy untuk menghentikan training ketika `stop-mode=target_accuracy`.
 - `fraction-train`: proporsi client yang disampling untuk training.
 - `fraction-evaluate`: proporsi client yang disampling untuk evaluasi client-side.
 - `local-epochs`: jumlah epoch training lokal per client terpilih.
@@ -132,6 +134,13 @@ Arti masing-masing parameter:
 - `staleness-weighting-mode`: mode weighting (`polynomial`, `fedstaleweight`, atau alias `fair`).
 - `staleness-exponent`: eksponen alpha untuk mode `polynomial`.
 - `fedstaleweight-ema-beta`: faktor EMA untuk estimasi expected staleness pada mode `fedstaleweight`.
+
+## Metrik yang Dilog ke W&B
+
+- `top1_test_accuracy`: akurasi Top-1 pada testing set.
+- `direction_variation`: variasi arah LoRA antar pembaruan global.
+- `number_of_client_trips_to_target_accuracy`: jumlah client trips sampai target accuracy tercapai.
+- `wall_clock_time_to_target_accuracy`: waktu wall-clock sampai target accuracy tercapai.
 
 ## Tabel Skenario Straggler (FAST/MEDIUM/SLOW)
 
@@ -201,6 +210,8 @@ Untuk membandingkan step-0 accuracy dengan **config identik** (hanya strategy da
 ```toml
 [tool.flwr.app.config]
 num-server-rounds = 5
+stop-mode = "num_rounds"
+target-accuracy = 0.90
 fraction-train = 0.005
 fraction-evaluate = 0.01
 local-epochs = 1
@@ -234,7 +245,7 @@ fedstaleweight-ema-beta = 0.8
 **CLI command:**
 
 ```bash
-flwr run . --stream --run-config "num-server-rounds=5 fraction-train=0.005 fraction-evaluate=0.01 local-epochs=1 learning-rate=0.003 lr-decay-interval=20 lr-decay-factor=0.9 min-learning-rate=0.0001 min-train-nodes=1 min-evaluate-nodes=1 min-available-nodes=1 batch-size=8 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 train-timeout-seconds=180.0 reply-poll-interval-seconds=2.0 async-max-in-flight=1 async-evaluate-interval=1 async-strategy='immediate' async-buffer-size=4 straggler-enabled=false straggler-scenario='balanced' baseline-mode='fixed' baseline-time-seconds=30.0 staleness-weighting-enabled=false staleness-weighting-mode='polynomial' staleness-exponent=0.5 fedstaleweight-ema-beta=0.8"
+flwr run . --stream --run-config "num-server-rounds=5 stop-mode=num_rounds target-accuracy=0.90 fraction-train=0.005 fraction-evaluate=0.01 local-epochs=1 learning-rate=0.003 lr-decay-interval=20 lr-decay-factor=0.9 min-learning-rate=0.0001 min-train-nodes=1 min-evaluate-nodes=1 min-available-nodes=1 batch-size=8 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 train-timeout-seconds=180.0 reply-poll-interval-seconds=2.0 async-max-in-flight=1 async-evaluate-interval=1 async-strategy='immediate' async-buffer-size=4 straggler-enabled=false straggler-scenario='balanced' baseline-mode='fixed' baseline-time-seconds=30.0 staleness-weighting-enabled=false staleness-weighting-mode='polynomial' staleness-exponent=0.5 fedstaleweight-ema-beta=0.8"
 ```
 
 ### Template 2: Async Buffered (FedStaleWeight Fairness Weighting)
@@ -244,6 +255,101 @@ flwr run . --stream --run-config "num-server-rounds=5 fraction-train=0.005 fract
 ```toml
 [tool.flwr.app.config]
 num-server-rounds = 5
+stop-mode = "num_rounds"
+target-accuracy = 0.90
+fraction-train = 0.005
+fraction-evaluate = 0.01
+local-epochs = 1
+learning-rate = 0.003
+lr-decay-interval = 20
+lr-decay-factor = 0.9
+min-learning-rate = 0.0001
+min-train-nodes = 1
+min-evaluate-nodes = 1
+min-available-nodes = 1
+batch-size = 8
+weight-decay = 0.01
+warmup-ratio = 0.1
+max-grad-norm = 1.0
+train-timeout-seconds = 180.0
+reply-poll-interval-seconds = 2.0
+async-max-in-flight = 1
+async-evaluate-interval = 1
+async-strategy = "buffered"
+async-buffer-size = 4
+straggler-enabled = false
+straggler-scenario = "balanced"
+baseline-mode = "fixed"
+baseline-time-seconds = 30.0
+staleness-weighting-enabled = false
+staleness-weighting-mode = "fedstaleweight"
+staleness-exponent = 0.5
+fedstaleweight-ema-beta = 0.8
+```
+
+**CLI command:**
+
+````bash
+flwr run . --stream --run-config "num-server-rounds=5 stop-mode=num_rounds target-accuracy=0.90 fraction-train=0.005 fraction-evaluate=0.01 local-epochs=1 learning-rate=0.003 lr-decay-interval=20 lr-decay-factor=0.9 min-learning-rate=0.0001 min-train-nodes=1 min-evaluate-nodes=1 min-available-nodes=1 batch-size=8 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 train-timeout-seconds=180.0 reply-poll-interval-seconds=2.0 async-max-in-flight=1 async-evaluate-interval=1 async-strategy='buffered' async-buffer-size=4 straggler-enabled=false straggler-scenario='balanced' baseline-mode='fixed' baseline-time-seconds=30.0 staleness-weighting-enabled=false staleness-weighting-mode='fedstaleweight' staleness-exponent=0.5 fedstaleweight-ema-beta=0.8"
+
+## Template Stop Berdasarkan Target Accuracy
+
+Gunakan `stop-mode="target_accuracy"` untuk menghentikan training saat Top-1 Test Accuracy mencapai ambang.
+
+### Template 3: Async Immediate (Stop by Target Accuracy)
+
+**File: `pyproject.toml` atau CLI override**
+
+```toml
+[tool.flwr.app.config]
+num-server-rounds = 50
+stop-mode = "target_accuracy"
+target-accuracy = 0.90
+fraction-train = 0.005
+fraction-evaluate = 0.01
+local-epochs = 1
+learning-rate = 0.003
+lr-decay-interval = 20
+lr-decay-factor = 0.9
+min-learning-rate = 0.0001
+min-train-nodes = 1
+min-evaluate-nodes = 1
+min-available-nodes = 1
+batch-size = 8
+weight-decay = 0.01
+warmup-ratio = 0.1
+max-grad-norm = 1.0
+train-timeout-seconds = 180.0
+reply-poll-interval-seconds = 2.0
+async-max-in-flight = 1
+async-evaluate-interval = 1
+async-strategy = "immediate"
+async-buffer-size = 4
+straggler-enabled = false
+straggler-scenario = "balanced"
+baseline-mode = "fixed"
+baseline-time-seconds = 30.0
+staleness-weighting-enabled = false
+staleness-weighting-mode = "polynomial"
+staleness-exponent = 0.5
+fedstaleweight-ema-beta = 0.8
+````
+
+**CLI command:**
+
+```bash
+flwr run . --stream --run-config "num-server-rounds=50 stop-mode=target_accuracy target-accuracy=0.90 fraction-train=0.005 fraction-evaluate=0.01 local-epochs=1 learning-rate=0.003 lr-decay-interval=20 lr-decay-factor=0.9 min-learning-rate=0.0001 min-train-nodes=1 min-evaluate-nodes=1 min-available-nodes=1 batch-size=8 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 train-timeout-seconds=180.0 reply-poll-interval-seconds=2.0 async-max-in-flight=1 async-evaluate-interval=1 async-strategy='immediate' async-buffer-size=4 straggler-enabled=false straggler-scenario='balanced' baseline-mode='fixed' baseline-time-seconds=30.0 staleness-weighting-enabled=false staleness-weighting-mode='polynomial' staleness-exponent=0.5 fedstaleweight-ema-beta=0.8"
+```
+
+### Template 4: Async Buffered (Stop by Target Accuracy)
+
+**File: `pyproject.toml` atau CLI override**
+
+```toml
+[tool.flwr.app.config]
+num-server-rounds = 50
+stop-mode = "target_accuracy"
+target-accuracy = 0.90
 fraction-train = 0.005
 fraction-evaluate = 0.01
 local-epochs = 1
@@ -277,7 +383,9 @@ fedstaleweight-ema-beta = 0.8
 **CLI command:**
 
 ```bash
-flwr run . --stream --run-config "num-server-rounds=5 fraction-train=0.005 fraction-evaluate=0.01 local-epochs=1 learning-rate=0.003 lr-decay-interval=20 lr-decay-factor=0.9 min-learning-rate=0.0001 min-train-nodes=1 min-evaluate-nodes=1 min-available-nodes=1 batch-size=8 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 train-timeout-seconds=180.0 reply-poll-interval-seconds=2.0 async-max-in-flight=1 async-evaluate-interval=1 async-strategy='buffered' async-buffer-size=4 straggler-enabled=false straggler-scenario='balanced' baseline-mode='fixed' baseline-time-seconds=30.0 staleness-weighting-enabled=false staleness-weighting-mode='fedstaleweight' staleness-exponent=0.5 fedstaleweight-ema-beta=0.8"
+flwr run . --stream --run-config "num-server-rounds=50 stop-mode=target_accuracy target-accuracy=0.90 fraction-train=0.005 fraction-evaluate=0.01 local-epochs=1 learning-rate=0.003 lr-decay-interval=20 lr-decay-factor=0.9 min-learning-rate=0.0001 min-train-nodes=1 min-evaluate-nodes=1 min-available-nodes=1 batch-size=8 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 train-timeout-seconds=180.0 reply-poll-interval-seconds=2.0 async-max-in-flight=1 async-evaluate-interval=1 async-strategy='buffered' async-buffer-size=4 straggler-enabled=false straggler-scenario='balanced' baseline-mode='fixed' baseline-time-seconds=30.0 staleness-weighting-enabled=false staleness-weighting-mode='fedstaleweight' staleness-exponent=0.5 fedstaleweight-ema-beta=0.8"
+```
+
 ```
 
 ### Perbedaan Kunci
@@ -293,3 +401,4 @@ flwr run . --stream --run-config "num-server-rounds=5 fraction-train=0.005 fract
 - Kedua template memiliki config identik kecuali `async-strategy` dan `staleness-weighting-mode`.
 - Jalankan kedua mode dengan config identik pada **environment yang sama** (local atau VM) untuk perbandingan fair.
 - Step-0 accuracy seharusnya **identik atau sangat dekat** jika tidak ada update yang diterapkan sebelum evaluasi awal.
+```

@@ -11,7 +11,11 @@ from flwr.serverapp import Grid
 from flwr.serverapp.strategy import FedAdagrad, Result
 from flwr.serverapp.strategy.strategy_utils import log_strategy_start_info
 
-from pytorchexample.task import get_top1_test_accuracy
+from pytorchexample.task import (
+    compute_direction_variation,
+    extract_lora_state,
+    get_top1_test_accuracy,
+)
 
 PROJECT_NAME = "flower-async-staleness"
 
@@ -114,6 +118,9 @@ class SynchronousStrategy(FedAdagrad):
         try:
             t_start = time.time()
             client_trips_done = 0
+            previous_lora_state = extract_lora_state(
+                initial_arrays.to_torch_state_dict()
+            )
             # Evaluate starting global parameters
             if evaluate_fn:
                 res = evaluate_fn(0, initial_arrays)
@@ -158,6 +165,17 @@ class SynchronousStrategy(FedAdagrad):
                 if agg_arrays is not None:
                     result.arrays = agg_arrays
                     arrays = agg_arrays
+                    current_state = arrays.to_torch_state_dict()
+                    direction_variation = compute_direction_variation(
+                        current_state,
+                        previous_lora_state,
+                    )
+                    previous_lora_state = extract_lora_state(current_state)
+                    if direction_variation is not None:
+                        wandb.log(
+                            {"direction_variation": direction_variation},
+                            step=current_round,
+                        )
                 if agg_train_metrics is not None:
                     log(INFO, "\t└──> Aggregated MetricRecord: %s", agg_train_metrics)
                     result.train_metrics_clientapp[current_round] = agg_train_metrics
