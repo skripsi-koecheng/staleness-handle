@@ -15,6 +15,7 @@ from flwr.serverapp.strategy.strategy_utils import log_strategy_start_info
 from pytorchexample.staleness import polynomial_staleness_weight
 from pytorchexample.task import (
     compute_direction_variation,
+    compute_lora_update_norm,
     extract_lora_state,
     get_top1_test_accuracy,
 )
@@ -163,15 +164,24 @@ class AsyncFedAvgStrategy(FedAvg):
             num_examples=num_examples,
         )
 
+        current_state = current_arrays.to_torch_state_dict()
+        client_state = client_arrays.to_torch_state_dict()
+        update_norm = compute_lora_update_norm(
+            extract_lora_state(client_state),
+            extract_lora_state(current_state),
+        )
+
         if current_total_weight <= 0:
             if self.staleness_weighting_enabled:
                 client_metrics = MetricRecord(
                     {**client_metrics, "staleness_boost": staleness_boost}
                 )
+            if update_norm is not None:
+                client_metrics = MetricRecord(
+                    {**client_metrics, "client_update_norm": update_norm}
+                )
             return client_arrays, effective_weight, client_metrics
 
-        current_state = current_arrays.to_torch_state_dict()
-        client_state = client_arrays.to_torch_state_dict()
         merged_state = self._weighted_average_state_dicts(
             current_state,
             current_total_weight,
@@ -181,6 +191,10 @@ class AsyncFedAvgStrategy(FedAvg):
         if self.staleness_weighting_enabled:
             client_metrics = MetricRecord(
                 {**client_metrics, "staleness_boost": staleness_boost}
+            )
+        if update_norm is not None:
+            client_metrics = MetricRecord(
+                {**client_metrics, "client_update_norm": update_norm}
             )
         return ArrayRecord(merged_state), current_total_weight + effective_weight, client_metrics
 
@@ -419,6 +433,8 @@ class AsyncFedAvgStrategy(FedAvg):
                     log_dict["round_duration"] = round_duration
                     if direction_variation is not None:
                         log_dict["direction_variation"] = direction_variation
+                    if "client_update_norm" in log_dict:
+                        log_dict["avg_client_update_norm"] = log_dict.pop("client_update_norm")
                     if self.staleness_weighting_enabled:
                         num_examples = float(
                             train_metrics.get(self.weighted_by_key, 0.0))

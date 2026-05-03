@@ -329,6 +329,25 @@ def compute_direction_variation(
     return _average_column_cosine_similarity(current_state, previous_state)
 
 
+def compute_lora_update_norm(
+    client_lora_state: dict[str, torch.Tensor],
+    global_lora_state: dict[str, torch.Tensor],
+) -> Optional[float]:
+    """L2 norm of (client_lora - global_lora) flattened across all LoRA tensors."""
+    sq_sum = 0.0
+    found = False
+    for name, client_tensor in client_lora_state.items():
+        global_tensor = global_lora_state.get(name)
+        if global_tensor is None or client_tensor.shape != global_tensor.shape:
+            continue
+        delta = client_tensor.float() - global_tensor.float()
+        sq_sum += delta.pow(2).sum().item()
+        found = True
+    if not found:
+        return None
+    return sq_sum ** 0.5
+
+
 def global_evaluate(server_round: int, arrays: ArrayRecord) -> MetricRecord:
     """Evaluate model on centralized AG News test data."""
     set_global_seed(GLOBAL_MODEL_SEED)

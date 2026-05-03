@@ -15,6 +15,7 @@ from flwr.serverapp.strategy.strategy_utils import log_strategy_start_info
 from pytorchexample.staleness import polynomial_staleness_weight
 from pytorchexample.task import (
     compute_direction_variation,
+    compute_lora_update_norm,
     extract_lora_state,
     get_top1_test_accuracy,
 )
@@ -341,6 +342,7 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
             message_to_node: dict[str, int] = {}
             message_to_dispatch_update: dict[str, int] = {}
             buffered_replies: list[tuple[Message, int, float]] = []
+            buffered_update_norms: list[float] = []
             global_updates_done = 0
 
             initial_dispatch = self._dispatch_messages(
@@ -400,6 +402,12 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                     expected_staleness = self._update_staleness_ema(
                         node_id if node_id is not None else reply.metadata.src_node_id, tau)
                     buffered_replies.append((reply, tau, expected_staleness))
+                    _norm = compute_lora_update_norm(
+                        extract_lora_state(client_arrays.to_torch_state_dict()),
+                        extract_lora_state(arrays.to_torch_state_dict()),
+                    )
+                    if _norm is not None:
+                        buffered_update_norms.append(_norm)
                     log(
                         INFO,
                         "[ASYNC-BUFFERED] buffered reply from node %s tau=%d ema=%.3f (%s/%s)",
@@ -414,6 +422,11 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                         agg_arrays, agg_metrics, consumed = self._aggregate_buffered_replies(
                             buffered_replies)
                         buffered_replies = []
+                        avg_update_norm = (
+                            sum(buffered_update_norms) / len(buffered_update_norms)
+                            if buffered_update_norms else None
+                        )
+                        buffered_update_norms = []
 
                         if agg_arrays is not None and agg_metrics is not None and consumed > 0:
                             global_updates_done += 1
@@ -437,6 +450,8 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
 
                             log_dict = dict(agg_metrics)
                             log_dict["round_duration"] = round_duration
+                            if avg_update_norm is not None:
+                                log_dict["avg_client_update_norm"] = avg_update_norm
                             if direction_variation is not None:
                                 log_dict["direction_variation"] = direction_variation
                             wandb.log(log_dict, step=global_updates_done)
@@ -488,6 +503,10 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
             if buffered_replies and global_updates_done < max(1, num_rounds):
                 agg_arrays, agg_metrics, consumed = self._aggregate_buffered_replies(
                     buffered_replies)
+                avg_update_norm = (
+                    sum(buffered_update_norms) / len(buffered_update_norms)
+                    if buffered_update_norms else None
+                )
                 if agg_arrays is not None and agg_metrics is not None and consumed > 0:
                     global_updates_done += 1
                     client_trips_done += consumed
@@ -508,6 +527,8 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
 
                     log_dict = dict(agg_metrics)
                     log_dict["round_duration"] = round_duration
+                    if avg_update_norm is not None:
+                        log_dict["avg_client_update_norm"] = avg_update_norm
                     if direction_variation is not None:
                         log_dict["direction_variation"] = direction_variation
                     wandb.log(log_dict, step=global_updates_done)
