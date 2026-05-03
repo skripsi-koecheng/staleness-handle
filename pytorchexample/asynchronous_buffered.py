@@ -317,6 +317,7 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
 
         try:
             t_start = time.time()
+            last_update_time = time.time()
             arrays = initial_arrays
             next_server_round = 1
             client_trips_done = 0
@@ -430,7 +431,12 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                             previous_lora_state = extract_lora_state(
                                 current_state)
 
+                            now = time.time()
+                            round_duration = now - last_update_time
+                            last_update_time = now
+
                             log_dict = dict(agg_metrics)
+                            log_dict["round_duration"] = round_duration
                             if direction_variation is not None:
                                 log_dict["direction_variation"] = direction_variation
                             wandb.log(log_dict, step=global_updates_done)
@@ -496,7 +502,12 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                     )
                     previous_lora_state = extract_lora_state(current_state)
 
+                    now = time.time()
+                    round_duration = now - last_update_time
+                    last_update_time = now
+
                     log_dict = dict(agg_metrics)
+                    log_dict["round_duration"] = round_duration
                     if direction_variation is not None:
                         log_dict["direction_variation"] = direction_variation
                     wandb.log(log_dict, step=global_updates_done)

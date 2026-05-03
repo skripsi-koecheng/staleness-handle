@@ -309,6 +309,7 @@ class AsyncFedAvgStrategy(FedAvg):
 
         try:
             t_start = time.time()
+            last_update_time = time.time()
             arrays = initial_arrays
             weighted_examples_seen = 0.0
             client_trips_done = 0
@@ -410,7 +411,12 @@ class AsyncFedAvgStrategy(FedAvg):
                     )
                     previous_lora_state = extract_lora_state(current_state)
 
+                    now = time.time()
+                    round_duration = now - last_update_time
+                    last_update_time = now
+
                     log_dict = dict(train_metrics)
+                    log_dict["round_duration"] = round_duration
                     if direction_variation is not None:
                         log_dict["direction_variation"] = direction_variation
                     if self.staleness_weighting_enabled:
