@@ -17,7 +17,7 @@ from pytorchexample.task import (
     get_top1_test_accuracy,
 )
 
-PROJECT_NAME = "flower-async-staleness"
+PROJECT_NAME = "Nvidia T4"
 
 
 class SynchronousStrategy(FedAdagrad):
