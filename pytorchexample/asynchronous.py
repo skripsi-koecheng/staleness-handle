@@ -20,7 +20,7 @@ from pytorchexample.task import (
     get_top1_test_accuracy,
 )
 
-PROJECT_NAME = "FLOWER-advanced-pytorch"
+PROJECT_NAME = "Nvidia T4"
 
 
 class AsyncFedAvgStrategy(FedAvg):
