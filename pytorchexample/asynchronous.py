@@ -336,6 +336,7 @@ class AsyncFedAvgStrategy(FedAvg):
                 log(INFO, "Initial global evaluation results: %s", initial_res)
                 if initial_res is not None:
                     result.evaluate_metrics_serverapp[0] = initial_res
+                    wandb.log(dict(initial_res), step=0)
                     if target_mode:
                         accuracy = get_top1_test_accuracy(initial_res)
                         if accuracy is not None and accuracy >= target_accuracy:
@@ -434,7 +435,8 @@ class AsyncFedAvgStrategy(FedAvg):
                     if direction_variation is not None:
                         log_dict["direction_variation"] = direction_variation
                     if "client_update_norm" in log_dict:
-                        log_dict["avg_client_update_norm"] = log_dict.pop("client_update_norm")
+                        log_dict["avg_client_update_norm"] = log_dict.pop(
+                            "client_update_norm")
                     if self.staleness_weighting_enabled:
                         num_examples = float(
                             train_metrics.get(self.weighted_by_key, 0.0))

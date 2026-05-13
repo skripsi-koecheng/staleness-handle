@@ -331,6 +331,7 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                 log(INFO, "Initial global evaluation results: %s", initial_res)
                 if initial_res is not None:
                     result.evaluate_metrics_serverapp[0] = initial_res
+                    wandb.log(dict(initial_res), step=0)
                     if target_mode:
                         accuracy = get_top1_test_accuracy(initial_res)
                         if accuracy is not None and accuracy >= target_accuracy:
@@ -403,7 +404,8 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                         node_id if node_id is not None else reply.metadata.src_node_id, tau)
                     buffered_replies.append((reply, tau, expected_staleness))
                     _norm = compute_lora_update_norm(
-                        extract_lora_state(client_arrays.to_torch_state_dict()),
+                        extract_lora_state(
+                            client_arrays.to_torch_state_dict()),
                         extract_lora_state(arrays.to_torch_state_dict()),
                     )
                     if _norm is not None:
@@ -423,7 +425,8 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                             buffered_replies)
                         buffered_replies = []
                         avg_update_norm = (
-                            sum(buffered_update_norms) / len(buffered_update_norms)
+                            sum(buffered_update_norms) /
+                            len(buffered_update_norms)
                             if buffered_update_norms else None
                         )
                         buffered_update_norms = []

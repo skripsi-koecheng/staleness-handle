@@ -127,6 +127,7 @@ class SynchronousStrategy(FedAdagrad):
                 log(INFO, "Initial global evaluation results: %s", res)
                 if res is not None:
                     result.evaluate_metrics_serverapp[0] = res
+                    wandb.log(dict(res), step=0)
                     if target_mode:
                         accuracy = get_top1_test_accuracy(res)
                         if accuracy is not None and accuracy >= target_accuracy:
