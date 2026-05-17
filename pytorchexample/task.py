@@ -30,8 +30,8 @@ DATASET_NAME = "sh0416/ag_news"
 MODEL_NAME = "distilbert/distilbert-base-uncased"
 NUM_LABELS = 4
 MAX_LENGTH = 256
-LORA_R = 16
-LORA_ALPHA = 32
+LORA_R = 8
+LORA_ALPHA = 16
 LORA_DROPOUT = 0.05
 LORA_TARGET_MODULES = ["q_lin", "v_lin"]
 
