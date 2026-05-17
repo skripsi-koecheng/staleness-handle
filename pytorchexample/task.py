@@ -80,6 +80,7 @@ class DistilBertAgNewsClassifier(nn.Module):
             lora_alpha=LORA_ALPHA,
             lora_dropout=LORA_DROPOUT,
             target_modules=LORA_TARGET_MODULES,
+            modules_to_save=["classifier", "pre_classifier"],
             bias="none",
         )
         self.model = get_peft_model(base_model, peft_config)
