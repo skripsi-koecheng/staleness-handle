@@ -336,7 +336,12 @@ class AsyncFedAvgStrategy(FedAvg):
                 log(INFO, "Initial global evaluation results: %s", initial_res)
                 if initial_res is not None:
                     result.evaluate_metrics_serverapp[0] = initial_res
-                    wandb.log(dict(initial_res), step=0)
+                    initial_log = dict(initial_res)
+                    if "top1_test_accuracy" in initial_log:
+                        initial_log["baseline_top1_test_accuracy"] = initial_log.pop(
+                            "top1_test_accuracy"
+                        )
+                    wandb.log(initial_log, step=0)
                     if target_mode:
                         accuracy = get_top1_test_accuracy(initial_res)
                         if accuracy is not None and accuracy >= target_accuracy:

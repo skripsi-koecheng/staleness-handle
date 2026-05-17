@@ -127,7 +127,12 @@ class _SynchronousBase:
                 log(INFO, "Initial global evaluation results: %s", res)
                 if res is not None:
                     result.evaluate_metrics_serverapp[0] = res
-                    wandb.log(dict(res), step=0)
+                    initial_log = dict(res)
+                    if "top1_test_accuracy" in initial_log:
+                        initial_log["baseline_top1_test_accuracy"] = initial_log.pop(
+                            "top1_test_accuracy"
+                        )
+                    wandb.log(initial_log, step=0)
                     if target_mode:
                         accuracy = get_top1_test_accuracy(res)
                         if accuracy is not None and accuracy >= target_accuracy:
