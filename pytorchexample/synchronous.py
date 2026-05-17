@@ -8,7 +8,7 @@ import wandb
 from flwr.app import ArrayRecord, ConfigRecord, Message, MetricRecord
 from flwr.common import log
 from flwr.serverapp import Grid
-from flwr.serverapp.strategy import FedAdagrad, Result
+from flwr.serverapp.strategy import FedAdagrad, FedAvg, Result
 from flwr.serverapp.strategy.strategy_utils import log_strategy_start_info
 
 from pytorchexample.task import (
@@ -20,7 +20,7 @@ from pytorchexample.task import (
 PROJECT_NAME = "Nvidia T4"
 
 
-class SynchronousStrategy(FedAdagrad):
+class _SynchronousBase:
 
     def __init__(
         self,
@@ -246,3 +246,11 @@ class SynchronousStrategy(FedAdagrad):
         finally:
             with suppress(Exception):
                 wandb.finish()
+
+
+class SynchronousFedAdagradStrategy(_SynchronousBase, FedAdagrad):
+    pass
+
+
+class SynchronousFedAvgStrategy(_SynchronousBase, FedAvg):
+    pass

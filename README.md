@@ -43,8 +43,13 @@ flwr run . --stream
 Contoh override config synchronous:
 
 ```bash
-flwr run . --stream --run-config "num-server-rounds=3 fraction-train=0.025 fraction-evaluate=0.05 local-epochs=1 learning-rate=0.1 batch-size=32 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 min-train-nodes=20 min-evaluate-nodes=40 min-available-nodes=10"
+flwr run . --stream --run-config "num-server-rounds=3 fraction-train=0.025 fraction-evaluate=0.05 local-epochs=1 learning-rate=0.1 batch-size=32 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 sync-optimizer='fedavg' min-train-nodes=20 min-evaluate-nodes=40 min-available-nodes=10"
 ```
+
+Pilihan optimizer sync:
+
+- `sync-optimizer='fedavg'` (default)
+- `sync-optimizer='fedadagrad'`
 
 Contoh synchronous dengan straggler simulation aktif:
 
@@ -120,6 +125,7 @@ Arti masing-masing parameter:
 - `weight-decay`: regularisasi AdamW.
 - `warmup-ratio`: rasio warmup scheduler linear.
 - `max-grad-norm`: nilai clip gradien maksimum.
+- `sync-optimizer`: optimizer server sync (`fedavg` atau `fedadagrad`).
 - `train-timeout-seconds`: timeout idle loop async saat tidak ada reply baru.
 - `reply-poll-interval-seconds`: interval polling inbox reply server async.
 - `async-max-in-flight`: jumlah maksimum request training yang berjalan paralel di async.

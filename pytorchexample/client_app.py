@@ -50,6 +50,9 @@ def train(msg: Message, context: Context):
         context.run_config["local-epochs"],
         msg.content["config"]["lr"],
         device,
+        msg.content["config"].get("weight_decay", 0.01),
+        msg.content["config"].get("warmup_ratio", 0.1),
+        msg.content["config"].get("max_grad_norm", 1.0),
     )
     train_duration = time.perf_counter() - train_start
 
