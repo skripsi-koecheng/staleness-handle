@@ -125,6 +125,7 @@ Arti masing-masing parameter:
 - `weight-decay`: regularisasi AdamW.
 - `warmup-ratio`: rasio warmup scheduler linear.
 - `max-grad-norm`: nilai clip gradien maksimum.
+- `use-lora`: aktif/nonaktif LoRA (default: `true`).
 - `sync-optimizer`: optimizer server sync (`fedavg` atau `fedadagrad`).
 - `train-timeout-seconds`: timeout idle loop async saat tidak ada reply baru.
 - `reply-poll-interval-seconds`: interval polling inbox reply server async.
@@ -147,6 +148,12 @@ Arti masing-masing parameter:
 - `direction_variation`: variasi arah LoRA antar pembaruan global.
 - `number_of_client_trips_to_target_accuracy`: jumlah client trips sampai target accuracy tercapai.
 - `wall_clock_time_to_target_accuracy`: waktu wall-clock sampai target accuracy tercapai.
+- `vram_allocated_mb`: VRAM terpakai pada client (MB).
+- `vram_reserved_mb`: VRAM reserved pada client (MB).
+- `communication_bytes`: ukuran payload update per client (byte).
+- `communication_megabytes`: ukuran payload update per client (MB).
+- `communication_params`: jumlah parameter update per client.
+- `relative_bandwidth_ratio`: rasio ukuran LoRA terhadap full fine-tuning ($\text{LoRA bytes} / \text{full bytes}$).
 
 ## Tabel Skenario Straggler (FAST/MEDIUM/SLOW)
 

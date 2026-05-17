@@ -9,6 +9,7 @@ from pytorchexample.task import (
     DistilBertAgNewsClassifier,
     global_evaluate,
     set_global_seed,
+    set_use_lora,
     GLOBAL_MODEL_SEED,
 )
 
@@ -68,10 +69,12 @@ def main(grid: Grid, context: Context) -> None:
     staleness_exponent: float = float(
         context.run_config.get("staleness-exponent", 1.0)
     )
+    use_lora: bool = bool(context.run_config.get("use-lora", True))
 
     # Seed before creating global model for deterministic initialization
     set_global_seed(GLOBAL_MODEL_SEED)
-    global_model = DistilBertAgNewsClassifier()
+    set_use_lora(use_lora)
+    global_model = DistilBertAgNewsClassifier(use_lora=use_lora)
     arrays = ArrayRecord(global_model.get_federated_state_dict())
 
     if async_strategy in {"buffered", "buffer"}:

@@ -35,6 +35,9 @@ LORA_ALPHA = 16
 LORA_DROPOUT = 0.05
 LORA_TARGET_MODULES = ["q_lin", "v_lin"]
 
+# Default to LoRA enabled unless overridden by config
+USE_LORA = True
+
 fds = None
 tokenizer = None
 
@@ -58,6 +61,11 @@ def set_global_seed(seed: int):
     torch.backends.cudnn.benchmark = False
 
 
+def set_use_lora(enabled: bool) -> None:
+    global USE_LORA
+    USE_LORA = bool(enabled)
+
+
 def seed_worker(worker_id):
     worker_seed = GLOBAL_MODEL_SEED + worker_id
     np.random.seed(worker_seed)
@@ -65,25 +73,53 @@ def seed_worker(worker_id):
     torch.manual_seed(worker_seed)
 
 
+def _state_dict_numel(state_dict: dict[str, torch.Tensor]) -> int:
+    return sum(tensor.numel() for tensor in state_dict.values())
+
+
+def _state_dict_bytes(state_dict: dict[str, torch.Tensor]) -> int:
+    return sum(
+        tensor.numel() * tensor.element_size() for tensor in state_dict.values()
+    )
+
+
+def get_state_dict_numel(state_dict: dict[str, torch.Tensor]) -> int:
+    return _state_dict_numel(state_dict)
+
+
+def get_state_dict_bytes(state_dict: dict[str, torch.Tensor]) -> int:
+    return _state_dict_bytes(state_dict)
+
+
 class DistilBertAgNewsClassifier(nn.Module):
     """DistilBERT + LoRA adapter for AG News text classification."""
 
-    def __init__(self):
+    def __init__(self, use_lora: Optional[bool] = None):
         super().__init__()
+        if use_lora is None:
+            use_lora = USE_LORA
+        self.use_lora = bool(use_lora)
         base_model = AutoModelForSequenceClassification.from_pretrained(
             MODEL_NAME,
             num_labels=NUM_LABELS,
         )
-        peft_config = LoraConfig(
-            task_type=TaskType.SEQ_CLS,
-            r=LORA_R,
-            lora_alpha=LORA_ALPHA,
-            lora_dropout=LORA_DROPOUT,
-            target_modules=LORA_TARGET_MODULES,
-            modules_to_save=["classifier", "pre_classifier"],
-            bias="none",
-        )
-        self.model = get_peft_model(base_model, peft_config)
+        full_state = base_model.state_dict()
+        self._full_state_numel = _state_dict_numel(full_state)
+        self._full_state_bytes = _state_dict_bytes(full_state)
+
+        if self.use_lora:
+            peft_config = LoraConfig(
+                task_type=TaskType.SEQ_CLS,
+                r=LORA_R,
+                lora_alpha=LORA_ALPHA,
+                lora_dropout=LORA_DROPOUT,
+                target_modules=LORA_TARGET_MODULES,
+                modules_to_save=["classifier", "pre_classifier"],
+                bias="none",
+            )
+            self.model = get_peft_model(base_model, peft_config)
+        else:
+            self.model = base_model
 
     def forward(self, input_ids, attention_mask, labels=None):
         return self.model(
@@ -93,10 +129,33 @@ class DistilBertAgNewsClassifier(nn.Module):
         )
 
     def get_federated_state_dict(self):
-        return get_peft_model_state_dict(self.model)
+        if self.use_lora:
+            return get_peft_model_state_dict(self.model)
+        return self.model.state_dict()
 
     def load_federated_state_dict(self, state_dict):
-        set_peft_model_state_dict(self.model, state_dict)
+        if self.use_lora:
+            set_peft_model_state_dict(self.model, state_dict)
+        else:
+            self.model.load_state_dict(state_dict)
+
+    def get_full_state_numel(self) -> int:
+        return self._full_state_numel
+
+    def get_full_state_bytes(self) -> int:
+        return self._full_state_bytes
+
+    def get_federated_state_numel(self) -> int:
+        return _state_dict_numel(self.get_federated_state_dict())
+
+    def get_federated_state_bytes(self) -> int:
+        return _state_dict_bytes(self.get_federated_state_dict())
+
+    def get_relative_bandwidth_ratio(self) -> Optional[float]:
+        full_bytes = self._full_state_bytes
+        if full_bytes <= 0:
+            return None
+        return self.get_federated_state_bytes() / full_bytes
 
 
 def _get_tokenizer():

@@ -9,6 +9,7 @@ from pytorchexample.task import (
     DistilBertAgNewsClassifier,
     global_evaluate,
     set_global_seed,
+    set_use_lora,
     GLOBAL_MODEL_SEED,
 )
 
@@ -42,6 +43,7 @@ def main(grid: Grid, context: Context) -> None:
         context.run_config.get("min-evaluate-nodes", 8))
     min_available_nodes: int = int(
         context.run_config.get("min-available-nodes", 8))
+    use_lora: bool = bool(context.run_config.get("use-lora", True))
 
     sync_optimizer: str = str(
         context.run_config.get("sync-optimizer", "fedadagrad")
@@ -49,7 +51,8 @@ def main(grid: Grid, context: Context) -> None:
 
     # Load global model (seeded for deterministic initialization)
     set_global_seed(GLOBAL_MODEL_SEED)
-    global_model = DistilBertAgNewsClassifier()
+    set_use_lora(use_lora)
+    global_model = DistilBertAgNewsClassifier(use_lora=use_lora)
     arrays = ArrayRecord(global_model.get_federated_state_dict())
 
     if sync_optimizer in {"fedavg", "avg"}:

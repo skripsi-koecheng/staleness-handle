@@ -11,6 +11,8 @@ from flwr.common import log
 from pytorchexample.straggler import compute_straggler, describe_tier_mapping
 from pytorchexample.task import (
     DistilBertAgNewsClassifier,
+    get_state_dict_bytes,
+    get_state_dict_numel,
     load_data,
     set_global_seed,
     GLOBAL_MODEL_SEED,
@@ -30,7 +32,8 @@ def train(msg: Message, context: Context):
     partition_id = context.node_config["partition-id"]
     # Seed deterministically per client partition
     set_global_seed(GLOBAL_MODEL_SEED + partition_id)
-    model = DistilBertAgNewsClassifier()
+    use_lora = bool(context.run_config.get("use-lora", True))
+    model = DistilBertAgNewsClassifier(use_lora=use_lora)
     model.load_federated_state_dict(
         msg.content["arrays"].to_torch_state_dict())
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -103,11 +106,34 @@ def train(msg: Message, context: Context):
             time.sleep(sim.sleep_duration)
 
     # Construct and return reply Message
-    model_record = ArrayRecord(model.get_federated_state_dict())
+    state_dict = model.get_federated_state_dict()
+    comm_params = get_state_dict_numel(state_dict)
+    comm_bytes = get_state_dict_bytes(state_dict)
+    full_bytes = model.get_full_state_bytes()
+    relative_ratio = comm_bytes / full_bytes if full_bytes > 0 else 0.0
+    model_record = ArrayRecord(state_dict)
     metrics = {
         "train_loss": train_loss,
         "num-examples": len(trainloader.dataset),
     }
+    if torch.cuda.is_available():
+        torch.cuda.synchronize(device)
+        metrics.update(
+            {
+                "vram_allocated_mb": torch.cuda.memory_allocated(device)
+                / (1024**2),
+                "vram_reserved_mb": torch.cuda.memory_reserved(device)
+                / (1024**2),
+            }
+        )
+    metrics.update(
+        {
+            "communication_bytes": comm_bytes,
+            "communication_megabytes": comm_bytes / (1024**2),
+            "communication_params": comm_params,
+            "relative_bandwidth_ratio": relative_ratio,
+        }
+    )
     metric_record = MetricRecord(metrics)
     content = RecordDict({"arrays": model_record, "metrics": metric_record})
     return Message(content=content, reply_to=msg)
@@ -121,7 +147,8 @@ def evaluate(msg: Message, context: Context):
     partition_id = context.node_config["partition-id"]
     # Seed deterministically per client partition
     set_global_seed(GLOBAL_MODEL_SEED + partition_id)
-    model = DistilBertAgNewsClassifier()
+    use_lora = bool(context.run_config.get("use-lora", True))
+    model = DistilBertAgNewsClassifier(use_lora=use_lora)
     model.load_federated_state_dict(
         msg.content["arrays"].to_torch_state_dict())
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
