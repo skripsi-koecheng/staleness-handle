@@ -2,7 +2,8 @@ import io
 import time
 from contextlib import suppress
 from logging import INFO
-from typing import Callable, Iterable, Optional
+from pprint import pformat
+from typing import Any, Callable, Iterable, Optional
 
 import torch
 import wandb
@@ -41,6 +42,7 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
         fedstaleweight_ema_beta: float = 0.8,
         staleness_weighting_enabled: bool = False,
         staleness_exponent: float = 1.0,
+        run_config: Optional[dict[str, Any]] = None,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
@@ -59,6 +61,37 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
         self.staleness_weighting_enabled = staleness_weighting_enabled
         self.staleness_exponent = staleness_exponent
         self.client_staleness_ema: dict[int, float] = {}
+        self.run_config = dict(run_config) if run_config is not None else {}
+
+    def _log_run_config(
+        self,
+        stage: str,
+        step: int,
+        train_config: Optional[ConfigRecord],
+    ) -> None:
+        if stage == "start":
+            config_payload: dict[str, Any] = {}
+            if self.run_config:
+                config_payload.update(
+                    {f"run_config.{k}": v for k, v in self.run_config.items()}
+                )
+            if train_config is not None:
+                config_payload.update(
+                    {f"train_config.{k}": v for k,
+                        v in dict(train_config).items()}
+                )
+            if config_payload:
+                wandb.config.update(config_payload, allow_val_change=True)
+
+        log(INFO, "[CONFIG-%s] run_config=%s",
+            stage.upper(), pformat(self.run_config))
+        if train_config is not None:
+            log(
+                INFO,
+                "[CONFIG-%s] train_config=%s",
+                stage.upper(),
+                pformat(dict(train_config)),
+            )
 
     def _maybe_decay_lr(self, global_updates_done: int, train_config: ConfigRecord) -> None:
         if global_updates_done <= 0 or global_updates_done % self.lr_decay_interval != 0:
@@ -317,6 +350,8 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
         }
         evaluation_interval = 1 if target_mode else self.async_evaluate_interval
 
+        self._log_run_config("start", 0, train_config)
+
         def log_target_metrics(step: int, client_trips: int) -> None:
             wall_clock_seconds = time.time() - t_start
             log(
@@ -334,6 +369,7 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                 step=step,
             )
 
+        last_step = 0
         try:
             t_start = time.time()
             last_update_time = time.time()
@@ -456,6 +492,7 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
 
                         if agg_arrays is not None and agg_metrics is not None and consumed > 0:
                             global_updates_done += 1
+                            last_step = global_updates_done
                             client_trips_done += consumed
                             arrays = agg_arrays
                             result.arrays = agg_arrays
@@ -535,6 +572,7 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                 )
                 if agg_arrays is not None and agg_metrics is not None and consumed > 0:
                     global_updates_done += 1
+                    last_step = global_updates_done
                     client_trips_done += consumed
                     arrays = agg_arrays
                     result.arrays = agg_arrays
@@ -584,4 +622,5 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
             return result
         finally:
             with suppress(Exception):
+                self._log_run_config("end", last_step, train_config)
                 wandb.finish()

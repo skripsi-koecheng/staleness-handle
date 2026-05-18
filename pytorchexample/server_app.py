@@ -49,6 +49,7 @@ def main(grid: Grid, context: Context) -> None:
     sync_optimizer: str = str(
         context.run_config.get("sync-optimizer", "fedadagrad")
     ).lower()
+    run_config_snapshot = dict(context.run_config)
 
     # Load global model (seeded for deterministic initialization)
     set_global_seed(GLOBAL_MODEL_SEED)
@@ -75,6 +76,7 @@ def main(grid: Grid, context: Context) -> None:
         min_available_nodes=min_available_nodes,
         min_train_nodes=min_train_nodes,
         min_evaluate_nodes=min_evaluate_nodes,
+        run_config=run_config_snapshot,
     )
 
     # Start strategy, run FedAvg for `num_rounds`
