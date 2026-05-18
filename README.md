@@ -109,7 +109,7 @@ Default `pyproject.toml` saat ini sudah di-set ke preset `Laptop-safe`.
 Contoh override untuk preset `Super-VM` (nanti saat VM siap):
 
 ```bash
-flwr run . --stream --run-config "num-server-rounds=12 fraction-train=0.025 fraction-evaluate=0.05 local-epochs=1 learning-rate=0.02 batch-size=32 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 use-lora=true min-train-nodes=8 min-evaluate-nodes=8 min-available-nodes=8 async-strategy='immediate' async-max-in-flight=8 async-evaluate-interval=1 straggler-enabled=true straggler-scenario='balanced' baseline-mode='measured' train-timeout-seconds=600.0"
+flwr run . --stream --run-config "num-server-rounds=12 fraction-train=0.025 fraction-evaluate=0.05 local-epochs=1 learning-rate=0.02 batch-size=32 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 use-lora=true min-train-nodes=8 min-evaluate-nodes=8 min-available-nodes=8 async-strategy='immediate' async-max-in-flight=8 async-evaluate-interval=1 straggler-enabled=true straggler-scenario='balanced' baseline-mode='measured' train-timeout-seconds=600.0 wandb-run-name='supervm-immediate-balanced'"
 ```
 
 Arti masing-masing parameter:
@@ -141,6 +141,7 @@ Arti masing-masing parameter:
 - `staleness-weighting-mode`: mode weighting (`polynomial`, `fedstaleweight`, atau alias `fair`).
 - `staleness-exponent`: eksponen alpha untuk mode `polynomial`.
 - `fedstaleweight-ema-beta`: faktor EMA untuk estimasi expected staleness pada mode `fedstaleweight`.
+- `wandb-run-name`: nama custom run di W&B. Jika kosong (default), W&B akan auto-generate nama.
 
 ## Metrik yang Dilog ke W&B
 
