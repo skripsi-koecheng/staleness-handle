@@ -277,11 +277,12 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                                        Optional[MetricRecord]]] = None,
         stop_mode: str = "num_rounds",
         target_accuracy: float = 0.9,
+        run_name: Optional[str] = None,
     ) -> Result:
         del timeout
         del evaluate_config
 
-        wandb.init(project=PROJECT_NAME)
+        wandb.init(project=PROJECT_NAME, name=run_name or None)
 
         log(INFO, "Starting %s strategy:", self.__class__.__name__)
         log_strategy_start_info(

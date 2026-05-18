@@ -44,6 +44,7 @@ def main(grid: Grid, context: Context) -> None:
     min_available_nodes: int = int(
         context.run_config.get("min-available-nodes", 8))
     use_lora: bool = bool(context.run_config.get("use-lora", True))
+    wandb_run_name: str = str(context.run_config.get("wandb-run-name", ""))
 
     sync_optimizer: str = str(
         context.run_config.get("sync-optimizer", "fedadagrad")
@@ -92,4 +93,5 @@ def main(grid: Grid, context: Context) -> None:
         evaluate_fn=global_evaluate,
         stop_mode=stop_mode,
         target_accuracy=target_accuracy,
+        run_name=wandb_run_name or None,
     )
