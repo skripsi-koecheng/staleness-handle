@@ -190,6 +190,23 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
             metrics_dict["avg_fairness_boost"] = sum(
                 sw for _, _, _, _, sw in valid_updates) / len(valid_updates)
 
+        _scalar_keys = [
+            "communication_bytes",
+            "communication_megabytes",
+            "communication_params",
+            "relative_bandwidth_ratio",
+            "vram_allocated_mb",
+            "vram_reserved_mb",
+        ]
+        for key in _scalar_keys:
+            values = [
+                float(m.get(key))
+                for _, m, _, _, _ in valid_updates
+                if m.get(key) is not None
+            ]
+            if values:
+                metrics_dict[key] = sum(values) / len(values)
+
         return ArrayRecord(aggregated_state), MetricRecord(metrics_dict), len(valid_updates)
 
     def configure_train(
