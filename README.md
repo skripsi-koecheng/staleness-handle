@@ -43,7 +43,7 @@ flwr run . --stream
 Contoh override config synchronous:
 
 ```bash
-flwr run . --stream --run-config "num-server-rounds=3 fraction-train=0.025 fraction-evaluate=0.05 local-epochs=1 learning-rate=0.1 batch-size=32 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 sync-optimizer='fedavg' min-train-nodes=20 min-evaluate-nodes=40 min-available-nodes=10"
+flwr run . --stream --run-config "num-server-rounds=3 fraction-train=0.025 fraction-evaluate=0.05 local-epochs=1 learning-rate=0.1 batch-size=32 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 use-lora=true sync-optimizer='fedavg' min-train-nodes=20 min-evaluate-nodes=40 min-available-nodes=10"
 ```
 
 Pilihan optimizer sync:
@@ -54,7 +54,7 @@ Pilihan optimizer sync:
 Contoh synchronous dengan straggler simulation aktif:
 
 ```bash
-flwr run . --stream --run-config "num-server-rounds=3 fraction-train=0.025 fraction-evaluate=0.05 local-epochs=1 learning-rate=0.1 batch-size=32 straggler-enabled=true straggler-scenario='balanced' baseline-mode='measured'"
+flwr run . --stream --run-config "num-server-rounds=3 fraction-train=0.025 fraction-evaluate=0.05 local-epochs=1 learning-rate=0.1 batch-size=32 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 use-lora=true sync-optimizer='fedavg' straggler-enabled=true straggler-scenario='balanced' baseline-mode='measured'"
 ```
 
 ## Menjalankan Mode Asynchronous
@@ -82,13 +82,13 @@ Mode asynchronous dipilih dengan `async-strategy`:
 Contoh override config asynchronous immediate:
 
 ```bash
-flwr run . --stream --run-config "num-server-rounds=3 fraction-train=0.025 fraction-evaluate=0.05 local-epochs=1 learning-rate=0.1 batch-size=32 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 train-timeout-seconds=600.0 reply-poll-interval-seconds=2.0 async-max-in-flight=4 async-evaluate-interval=4 async-strategy='immediate' straggler-enabled=true straggler-scenario='balanced' baseline-mode='measured'"
+flwr run . --stream --run-config "num-server-rounds=3 fraction-train=0.025 fraction-evaluate=0.05 local-epochs=1 learning-rate=0.1 batch-size=32 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 use-lora=true train-timeout-seconds=600.0 reply-poll-interval-seconds=2.0 async-max-in-flight=4 async-evaluate-interval=4 async-strategy='immediate' straggler-enabled=true straggler-scenario='balanced' baseline-mode='measured'"
 ```
 
 Contoh override config asynchronous buffered:
 
 ```bash
-flwr run . --stream --run-config "num-server-rounds=3 fraction-train=0.025 fraction-evaluate=0.05 local-epochs=1 learning-rate=0.1 batch-size=32 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 train-timeout-seconds=600.0 reply-poll-interval-seconds=2.0 async-max-in-flight=4 async-evaluate-interval=4 async-strategy='buffered' async-buffer-size=4 straggler-enabled=true straggler-scenario='slow_dominant' baseline-mode='fixed' baseline-time-seconds=60.0"
+flwr run . --stream --run-config "num-server-rounds=3 fraction-train=0.025 fraction-evaluate=0.05 local-epochs=1 learning-rate=0.1 batch-size=32 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 use-lora=true train-timeout-seconds=600.0 reply-poll-interval-seconds=2.0 async-max-in-flight=4 async-evaluate-interval=4 async-strategy='buffered' async-buffer-size=4 straggler-enabled=true straggler-scenario='slow_dominant' baseline-mode='fixed' baseline-time-seconds=60.0"
 ```
 
 ## Penjelasan Konfigurasi
@@ -109,7 +109,7 @@ Default `pyproject.toml` saat ini sudah di-set ke preset `Laptop-safe`.
 Contoh override untuk preset `Super-VM` (nanti saat VM siap):
 
 ```bash
-flwr run . --stream --run-config "num-server-rounds=12 fraction-train=0.025 fraction-evaluate=0.05 local-epochs=1 learning-rate=0.02 batch-size=32 min-train-nodes=8 min-evaluate-nodes=8 min-available-nodes=8 async-strategy='immediate' async-max-in-flight=8 async-evaluate-interval=1 straggler-enabled=true straggler-scenario='balanced' baseline-mode='measured' train-timeout-seconds=600.0"
+flwr run . --stream --run-config "num-server-rounds=12 fraction-train=0.025 fraction-evaluate=0.05 local-epochs=1 learning-rate=0.02 batch-size=32 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 use-lora=true min-train-nodes=8 min-evaluate-nodes=8 min-available-nodes=8 async-strategy='immediate' async-max-in-flight=8 async-evaluate-interval=1 straggler-enabled=true straggler-scenario='balanced' baseline-mode='measured' train-timeout-seconds=600.0"
 ```
 
 Arti masing-masing parameter:
@@ -239,6 +239,7 @@ batch-size = 8
 weight-decay = 0.01
 warmup-ratio = 0.1
 max-grad-norm = 1.0
+use-lora = true
 train-timeout-seconds = 180.0
 reply-poll-interval-seconds = 2.0
 async-max-in-flight = 1
@@ -258,7 +259,7 @@ fedstaleweight-ema-beta = 0.8
 **CLI command:**
 
 ```bash
-flwr run . --stream --run-config "num-server-rounds=5 stop-mode=num_rounds target-accuracy=0.90 fraction-train=0.005 fraction-evaluate=0.01 local-epochs=1 learning-rate=0.003 lr-decay-interval=20 lr-decay-factor=0.9 min-learning-rate=0.0001 min-train-nodes=1 min-evaluate-nodes=1 min-available-nodes=1 batch-size=8 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 train-timeout-seconds=180.0 reply-poll-interval-seconds=2.0 async-max-in-flight=1 async-evaluate-interval=1 async-strategy='immediate' async-buffer-size=4 straggler-enabled=false straggler-scenario='balanced' baseline-mode='fixed' baseline-time-seconds=30.0 staleness-weighting-enabled=false staleness-weighting-mode='polynomial' staleness-exponent=0.5 fedstaleweight-ema-beta=0.8"
+flwr run . --stream --run-config "num-server-rounds=5 stop-mode=num_rounds target-accuracy=0.90 fraction-train=0.005 fraction-evaluate=0.01 local-epochs=1 learning-rate=0.003 lr-decay-interval=20 lr-decay-factor=0.9 min-learning-rate=0.0001 min-train-nodes=1 min-evaluate-nodes=1 min-available-nodes=1 batch-size=8 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 use-lora=true train-timeout-seconds=180.0 reply-poll-interval-seconds=2.0 async-max-in-flight=1 async-evaluate-interval=1 async-strategy='immediate' async-buffer-size=4 straggler-enabled=false straggler-scenario='balanced' baseline-mode='fixed' baseline-time-seconds=30.0 staleness-weighting-enabled=false staleness-weighting-mode='polynomial' staleness-exponent=0.5 fedstaleweight-ema-beta=0.8"
 ```
 
 ### Template 2: Async Buffered (FedStaleWeight Fairness Weighting)
@@ -284,6 +285,7 @@ batch-size = 8
 weight-decay = 0.01
 warmup-ratio = 0.1
 max-grad-norm = 1.0
+use-lora = true
 train-timeout-seconds = 180.0
 reply-poll-interval-seconds = 2.0
 async-max-in-flight = 1
@@ -303,7 +305,7 @@ fedstaleweight-ema-beta = 0.8
 **CLI command:**
 
 ````bash
-flwr run . --stream --run-config "num-server-rounds=5 stop-mode=num_rounds target-accuracy=0.90 fraction-train=0.005 fraction-evaluate=0.01 local-epochs=1 learning-rate=0.003 lr-decay-interval=20 lr-decay-factor=0.9 min-learning-rate=0.0001 min-train-nodes=1 min-evaluate-nodes=1 min-available-nodes=1 batch-size=8 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 train-timeout-seconds=180.0 reply-poll-interval-seconds=2.0 async-max-in-flight=1 async-evaluate-interval=1 async-strategy='buffered' async-buffer-size=4 straggler-enabled=false straggler-scenario='balanced' baseline-mode='fixed' baseline-time-seconds=30.0 staleness-weighting-enabled=false staleness-weighting-mode='fedstaleweight' staleness-exponent=0.5 fedstaleweight-ema-beta=0.8"
+flwr run . --stream --run-config "num-server-rounds=5 stop-mode=num_rounds target-accuracy=0.90 fraction-train=0.005 fraction-evaluate=0.01 local-epochs=1 learning-rate=0.003 lr-decay-interval=20 lr-decay-factor=0.9 min-learning-rate=0.0001 min-train-nodes=1 min-evaluate-nodes=1 min-available-nodes=1 batch-size=8 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 use-lora=true train-timeout-seconds=180.0 reply-poll-interval-seconds=2.0 async-max-in-flight=1 async-evaluate-interval=1 async-strategy='buffered' async-buffer-size=4 straggler-enabled=false straggler-scenario='balanced' baseline-mode='fixed' baseline-time-seconds=30.0 staleness-weighting-enabled=false staleness-weighting-mode='fedstaleweight' staleness-exponent=0.5 fedstaleweight-ema-beta=0.8"
 
 ## Template Stop Berdasarkan Target Accuracy
 
@@ -332,6 +334,7 @@ batch-size = 8
 weight-decay = 0.01
 warmup-ratio = 0.1
 max-grad-norm = 1.0
+use-lora = true
 train-timeout-seconds = 180.0
 reply-poll-interval-seconds = 2.0
 async-max-in-flight = 1
@@ -351,7 +354,7 @@ fedstaleweight-ema-beta = 0.8
 **CLI command:**
 
 ```bash
-flwr run . --stream --run-config "num-server-rounds=50 stop-mode=target_accuracy target-accuracy=0.90 fraction-train=0.005 fraction-evaluate=0.01 local-epochs=1 learning-rate=0.003 lr-decay-interval=20 lr-decay-factor=0.9 min-learning-rate=0.0001 min-train-nodes=1 min-evaluate-nodes=1 min-available-nodes=1 batch-size=8 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 train-timeout-seconds=180.0 reply-poll-interval-seconds=2.0 async-max-in-flight=1 async-evaluate-interval=1 async-strategy='immediate' async-buffer-size=4 straggler-enabled=false straggler-scenario='balanced' baseline-mode='fixed' baseline-time-seconds=30.0 staleness-weighting-enabled=false staleness-weighting-mode='polynomial' staleness-exponent=0.5 fedstaleweight-ema-beta=0.8"
+flwr run . --stream --run-config "num-server-rounds=50 stop-mode=target_accuracy target-accuracy=0.90 fraction-train=0.005 fraction-evaluate=0.01 local-epochs=1 learning-rate=0.003 lr-decay-interval=20 lr-decay-factor=0.9 min-learning-rate=0.0001 min-train-nodes=1 min-evaluate-nodes=1 min-available-nodes=1 batch-size=8 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 use-lora=true train-timeout-seconds=180.0 reply-poll-interval-seconds=2.0 async-max-in-flight=1 async-evaluate-interval=1 async-strategy='immediate' async-buffer-size=4 straggler-enabled=false straggler-scenario='balanced' baseline-mode='fixed' baseline-time-seconds=30.0 staleness-weighting-enabled=false staleness-weighting-mode='polynomial' staleness-exponent=0.5 fedstaleweight-ema-beta=0.8"
 ```
 
 ### Template 4: Async Buffered (Stop by Target Accuracy)
@@ -377,6 +380,7 @@ batch-size = 8
 weight-decay = 0.01
 warmup-ratio = 0.1
 max-grad-norm = 1.0
+use-lora = true
 train-timeout-seconds = 180.0
 reply-poll-interval-seconds = 2.0
 async-max-in-flight = 1
@@ -396,7 +400,7 @@ fedstaleweight-ema-beta = 0.8
 **CLI command:**
 
 ```bash
-flwr run . --stream --run-config "num-server-rounds=50 stop-mode=target_accuracy target-accuracy=0.90 fraction-train=0.005 fraction-evaluate=0.01 local-epochs=1 learning-rate=0.003 lr-decay-interval=20 lr-decay-factor=0.9 min-learning-rate=0.0001 min-train-nodes=1 min-evaluate-nodes=1 min-available-nodes=1 batch-size=8 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 train-timeout-seconds=180.0 reply-poll-interval-seconds=2.0 async-max-in-flight=1 async-evaluate-interval=1 async-strategy='buffered' async-buffer-size=4 straggler-enabled=false straggler-scenario='balanced' baseline-mode='fixed' baseline-time-seconds=30.0 staleness-weighting-enabled=false staleness-weighting-mode='fedstaleweight' staleness-exponent=0.5 fedstaleweight-ema-beta=0.8"
+flwr run . --stream --run-config "num-server-rounds=50 stop-mode=target_accuracy target-accuracy=0.90 fraction-train=0.005 fraction-evaluate=0.01 local-epochs=1 learning-rate=0.003 lr-decay-interval=20 lr-decay-factor=0.9 min-learning-rate=0.0001 min-train-nodes=1 min-evaluate-nodes=1 min-available-nodes=1 batch-size=8 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 use-lora=true train-timeout-seconds=180.0 reply-poll-interval-seconds=2.0 async-max-in-flight=1 async-evaluate-interval=1 async-strategy='buffered' async-buffer-size=4 straggler-enabled=false straggler-scenario='balanced' baseline-mode='fixed' baseline-time-seconds=30.0 staleness-weighting-enabled=false staleness-weighting-mode='fedstaleweight' staleness-exponent=0.5 fedstaleweight-ema-beta=0.8"
 ```
 
 ```

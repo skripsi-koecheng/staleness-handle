@@ -416,11 +416,15 @@ def global_evaluate(server_round: int, arrays: ArrayRecord) -> MetricRecord:
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model.to(device)
     test_dataloader = load_centralized_dataset()
-    _, test_acc = test(model, test_dataloader, device)
+    eval_loss, test_acc = test(model, test_dataloader, device)
     log(
         INFO,
-        "[GLOBAL][ROUND %s] Top-1 Test Accuracy=%.4f",
+        "[GLOBAL][ROUND %s] Eval Loss=%.4f | Top-1 Test Accuracy=%.4f",
         server_round,
+        eval_loss,
         test_acc,
     )
-    return MetricRecord({TOP1_TEST_ACCURACY_KEY: test_acc})
+    return MetricRecord({
+        TOP1_TEST_ACCURACY_KEY: test_acc,
+        "eval_loss": eval_loss,
+    })
