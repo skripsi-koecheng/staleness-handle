@@ -2,7 +2,8 @@ import io
 import time
 from contextlib import suppress
 from logging import INFO
-from typing import Callable, Iterable, Optional
+from pprint import pformat
+from typing import Any, Callable, Iterable, Optional
 
 import wandb
 from flwr.app import ArrayRecord, ConfigRecord, Message, MetricRecord
@@ -28,12 +29,59 @@ class _SynchronousBase:
         lr_decay_interval: int = 20,
         lr_decay_factor: float = 0.9,
         min_learning_rate: float = 1e-4,
+        run_config: Optional[dict[str, Any]] = None,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
         self.lr_decay_interval = max(1, lr_decay_interval)
         self.lr_decay_factor = min(1.0, max(0.0, lr_decay_factor))
         self.min_learning_rate = max(0.0, min_learning_rate)
+        self.run_config = dict(run_config) if run_config is not None else {}
+
+    def _log_run_config(
+        self,
+        stage: str,
+        step: int,
+        train_config: Optional[ConfigRecord],
+        evaluate_config: Optional[ConfigRecord],
+    ) -> None:
+        if stage == "start":
+            config_payload: dict[str, Any] = {}
+            if self.run_config:
+                config_payload.update(
+                    {f"run_config.{k}": v for k, v in self.run_config.items()}
+                )
+            if train_config is not None:
+                config_payload.update(
+                    {f"train_config.{k}": v for k,
+                        v in dict(train_config).items()}
+                )
+            if evaluate_config is not None:
+                config_payload.update(
+                    {
+                        f"evaluate_config.{k}": v
+                        for k, v in dict(evaluate_config).items()
+                    }
+                )
+            if config_payload:
+                wandb.config.update(config_payload, allow_val_change=True)
+
+        log(INFO, "[CONFIG-%s] run_config=%s",
+            stage.upper(), pformat(self.run_config))
+        if train_config is not None:
+            log(
+                INFO,
+                "[CONFIG-%s] train_config=%s",
+                stage.upper(),
+                pformat(dict(train_config)),
+            )
+        if evaluate_config is not None:
+            log(
+                INFO,
+                "[CONFIG-%s] evaluate_config=%s",
+                stage.upper(),
+                pformat(dict(evaluate_config)),
+            )
 
     def configure_train(
         self, server_round: int, arrays: ArrayRecord, config: ConfigRecord, grid: Grid
@@ -99,6 +147,8 @@ class _SynchronousBase:
             "target",
         }
 
+        self._log_run_config("start", 0, train_config, evaluate_config)
+
         def log_target_metrics(step: int, client_trips: int) -> None:
             wall_clock_seconds = time.time() - t_start
             log(
@@ -117,6 +167,7 @@ class _SynchronousBase:
             )
 
         try:
+            last_step = 0
             t_start = time.time()
             client_trips_done = 0
             previous_lora_state = extract_lora_state(
@@ -143,6 +194,7 @@ class _SynchronousBase:
             arrays = initial_arrays
 
             for current_round in range(1, num_rounds + 1):
+                last_step = current_round
                 log(INFO, "")
                 log(INFO, "[ROUND %s/%s]", current_round, num_rounds)
 
@@ -251,6 +303,8 @@ class _SynchronousBase:
             return result
         finally:
             with suppress(Exception):
+                self._log_run_config(
+                    "end", last_step, train_config, evaluate_config)
                 wandb.finish()
 
 

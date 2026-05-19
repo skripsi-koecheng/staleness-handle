@@ -70,6 +70,7 @@ def main(grid: Grid, context: Context) -> None:
         context.run_config.get("staleness-exponent", 1.0)
     )
     use_lora: bool = bool(context.run_config.get("use-lora", True))
+    run_config_snapshot = dict(context.run_config)
     wandb_run_name: str = str(context.run_config.get("wandb-run-name", ""))
 
     # Seed before creating global model for deterministic initialization
@@ -97,6 +98,7 @@ def main(grid: Grid, context: Context) -> None:
             min_evaluate_nodes=min_evaluate_nodes,
             staleness_weighting_enabled=staleness_weighting_enabled,
             staleness_exponent=staleness_exponent,
+            run_config=run_config_snapshot,
         )
     elif async_strategy in {"immediate", "plain"}:
         strategy = AsyncFedAvgStrategy(
@@ -116,6 +118,7 @@ def main(grid: Grid, context: Context) -> None:
             min_evaluate_nodes=min_evaluate_nodes,
             staleness_weighting_enabled=staleness_weighting_enabled,
             staleness_exponent=staleness_exponent,
+            run_config=run_config_snapshot,
         )
     else:
         raise ValueError(
