@@ -11,9 +11,13 @@ else
 fi
 
 cp pyproject.toml pyproject.toml.bak
-sed -i '' "s|serverapp = .*|serverapp = \"$SERVER\"|" pyproject.toml
-sed -i '' "s|clientapp = .*|clientapp = \"$CLIENT\"|" pyproject.toml
+sed -i "s|serverapp = .*|serverapp = \"$SERVER\"|" pyproject.toml
+sed -i "s|clientapp = .*|clientapp = \"$CLIENT\"|" pyproject.toml
 
-flwr run . --stream "$@"
+if [ $# -gt 0 ]; then
+  flwr run . --stream --run-config "$@"
+else
+  flwr run . --stream
+fi
 
 mv pyproject.toml.bak pyproject.toml
