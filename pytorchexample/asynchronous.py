@@ -475,6 +475,7 @@ class AsyncFedAvgStrategy(FedAvg):
 
                     log_dict = dict(train_metrics)
                     log_dict["round_duration"] = round_duration
+                    log_dict["tau"] = tau
                     if direction_variation is not None:
                         log_dict["direction_variation"] = direction_variation
                     if "client_update_norm" in log_dict:
@@ -492,7 +493,6 @@ class AsyncFedAvgStrategy(FedAvg):
                             self.staleness_weighting_mode, tau, staleness_boost, final_weight,
                         )
                         log_dict.update({
-                            "tau": tau,
                             "staleness_weight": staleness_boost,
                             "final_weight": final_weight,
                         })

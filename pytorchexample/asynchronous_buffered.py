@@ -152,6 +152,7 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
         # valid_updates: (client_arrays, client_metrics, effective_weight, expected_staleness, fairness_boost)
         valid_updates: list[tuple[ArrayRecord,
                                   MetricRecord, float, float, float]] = []
+        valid_taus: list[int] = []
         for reply, tau, expected_staleness in buffered_replies:
             client_arrays, client_metrics, num_examples = self._extract_train_reply(
                 reply)
@@ -174,6 +175,7 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                     effective_weight = num_examples
                 valid_updates.append(
                     (client_arrays, client_metrics, effective_weight, expected_staleness, fairness_boost))
+                valid_taus.append(tau)
 
         if not valid_updates:
             return None, None, 0
@@ -216,6 +218,7 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
             "train_loss": weighted_train_loss / total_weight,
             self.weighted_by_key: total_weight,
             "buffer_size": len(valid_updates),
+            "avg_tau": sum(valid_taus) / len(valid_taus),
         }
         if self.staleness_weighting_enabled:
             metrics_dict["avg_expected_staleness"] = sum(
