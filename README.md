@@ -6,7 +6,35 @@ README ini hanya berisi cara menjalankan mode synchronous dan asynchronous (imme
 
 ```bash
 pip install -e .
+chmod +x run.sh
 ```
+
+## Cara Menjalankan dengan `run.sh`
+
+Gunakan `run.sh` untuk menjalankan eksperimen tanpa perlu mengedit `pyproject.toml` secara manual. Script ini otomatis mengganti `serverapp` dan `clientapp` sesuai mode, lalu mengembalikannya setelah selesai.
+
+```bash
+./run.sh <mode> "<run-config>"
+```
+
+- `<mode>`: `sync` atau `async` (default: `async`)
+- `<run-config>`: string konfigurasi yang sama seperti `--run-config` pada `flwr run`
+
+Contoh:
+
+```bash
+# Async (default)
+./run.sh async "num-server-rounds=50 async-strategy='buffered' wandb-run-name='exp-buffered'"
+
+# Sync
+./run.sh sync "num-server-rounds=50 learning-rate=0.001 wandb-run-name='exp-sync'"
+
+# Tanpa override (pakai config pyproject.toml)
+./run.sh async
+./run.sh sync
+```
+
+> **Catatan:** `run.sh` akan membuat backup `pyproject.toml.bak` selama eksperimen berjalan dan mengembalikannya otomatis setelah selesai.
 
 ## Konfigurasi Jumlah Client (num-supernodes)
 
@@ -31,19 +59,14 @@ Mode ini memakai:
 - `pytorchexample/server_app.py`
 - `pytorchexample/client_app.py`
 
-Langkah:
-
-1. Pastikan `tool.flwr.app.components.serverapp` dan `tool.flwr.app.components.clientapp` di `pyproject.toml` mengarah ke file synchronous.
-2. Jalankan:
-
 ```bash
-flwr run . --stream
+./run.sh sync
 ```
 
 Contoh override config synchronous:
 
 ```bash
-flwr run . --stream --run-config "num-server-rounds=3 fraction-train=0.025 fraction-evaluate=0.05 local-epochs=1 learning-rate=0.1 batch-size=32 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 use-lora=true sync-optimizer='fedavg' min-train-nodes=20 min-evaluate-nodes=40 min-available-nodes=10"
+./run.sh sync "num-server-rounds=3 fraction-train=0.025 fraction-evaluate=0.05 local-epochs=1 learning-rate=0.1 batch-size=32 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 sync-optimizer='fedavg' min-train-nodes=20 min-evaluate-nodes=40 min-available-nodes=10"
 ```
 
 Pilihan optimizer sync:
@@ -54,7 +77,7 @@ Pilihan optimizer sync:
 Contoh synchronous dengan straggler simulation aktif:
 
 ```bash
-flwr run . --stream --run-config "num-server-rounds=3 fraction-train=0.025 fraction-evaluate=0.05 local-epochs=1 learning-rate=0.1 batch-size=32 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 use-lora=true sync-optimizer='fedavg' straggler-enabled=true straggler-scenario='balanced' baseline-mode='measured'"
+./run.sh sync "num-server-rounds=3 fraction-train=0.025 fraction-evaluate=0.05 local-epochs=1 learning-rate=0.1 batch-size=32 straggler-enabled=true straggler-scenario='balanced' baseline-mode='measured' wandb-run-name='sync-straggler'"
 ```
 
 ## Menjalankan Mode Asynchronous
@@ -64,31 +87,25 @@ Mode ini memakai:
 - `pytorchexample/server_app_async.py`
 - `pytorchexample/client_app_async.py`
 
-Langkah:
-
-1. Ubah `tool.flwr.app.components.serverapp` ke `pytorchexample.server_app_async:app`.
-2. Ubah `tool.flwr.app.components.clientapp` ke `pytorchexample.client_app_async:app`.
-3. Jalankan:
-
 ```bash
-flwr run . --stream
+./run.sh async
 ```
 
 Mode asynchronous dipilih dengan `async-strategy`:
 
-- `async-strategy="immediate"`: update global model setiap ada 1 reply client.
-- `async-strategy="buffered"`: kumpulkan reply sampai `async-buffer-size`, lalu update global model dengan FedAvg.
+- `async-strategy='immediate'`: update global model setiap ada 1 reply client.
+- `async-strategy='buffered'`: kumpulkan reply sampai `async-buffer-size`, lalu update global model dengan FedAvg.
 
 Contoh override config asynchronous immediate:
 
 ```bash
-flwr run . --stream --run-config "num-server-rounds=3 fraction-train=0.025 fraction-evaluate=0.05 local-epochs=1 learning-rate=0.1 batch-size=32 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 use-lora=true train-timeout-seconds=600.0 reply-poll-interval-seconds=2.0 async-max-in-flight=4 async-evaluate-interval=4 async-strategy='immediate' straggler-enabled=true straggler-scenario='balanced' baseline-mode='measured'"
+./run.sh async "num-server-rounds=3 fraction-train=0.025 fraction-evaluate=0.05 local-epochs=1 learning-rate=0.1 batch-size=32 train-timeout-seconds=600.0 async-max-in-flight=4 async-evaluate-interval=4 async-strategy='immediate' straggler-enabled=true straggler-scenario='balanced' baseline-mode='measured' wandb-run-name='async-imm-balanced'"
 ```
 
 Contoh override config asynchronous buffered:
 
 ```bash
-flwr run . --stream --run-config "num-server-rounds=3 fraction-train=0.025 fraction-evaluate=0.05 local-epochs=1 learning-rate=0.1 batch-size=32 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 use-lora=true train-timeout-seconds=600.0 reply-poll-interval-seconds=2.0 async-max-in-flight=4 async-evaluate-interval=4 async-strategy='buffered' async-buffer-size=4 straggler-enabled=true straggler-scenario='slow_dominant' baseline-mode='fixed' baseline-time-seconds=60.0"
+./run.sh async "num-server-rounds=3 fraction-train=0.025 fraction-evaluate=0.05 local-epochs=1 learning-rate=0.1 batch-size=32 train-timeout-seconds=600.0 async-max-in-flight=4 async-evaluate-interval=4 async-strategy='buffered' async-buffer-size=4 straggler-enabled=true straggler-scenario='slow_dominant' baseline-mode='fixed' baseline-time-seconds=60.0 wandb-run-name='async-buff-slow'"
 ```
 
 ## Penjelasan Konfigurasi
