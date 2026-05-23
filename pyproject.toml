@@ -23,8 +23,8 @@ packages = ["."]
 publisher = "flwrlabs"
 
 [tool.flwr.app.components]
-serverapp = "pytorchexample.server_app_async:app"
-clientapp = "pytorchexample.client_app_async:app"
+serverapp = "pytorchexample.server_app:app"
+clientapp = "pytorchexample.client_app:app"
 
 [tool.flwr.app.config]
 num-server-rounds = 5
