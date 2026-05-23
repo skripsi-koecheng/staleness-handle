@@ -18,7 +18,7 @@ from pytorchexample.task import (
     get_top1_test_accuracy,
 )
 
-PROJECT_NAME = "Nvidia T4"
+PROJECT_NAME = "FL LoRA"
 
 
 class _SynchronousBase:
