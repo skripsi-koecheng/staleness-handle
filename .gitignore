@@ -18,6 +18,7 @@ venv.bak/
 *.swo
 *~
 .DS_Store
+docs/
 
 # Python
 __pycache__/

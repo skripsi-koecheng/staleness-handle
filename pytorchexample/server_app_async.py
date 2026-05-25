@@ -5,7 +5,13 @@ from flwr.serverapp import Grid, ServerApp
 
 from pytorchexample.asynchronous import AsyncFedAvgStrategy
 from pytorchexample.asynchronous_buffered import AsyncBufferedFedAvgStrategy
-from pytorchexample.task import DistilBertAgNewsClassifier, global_evaluate
+from pytorchexample.task import (
+    DistilBertAgNewsClassifier,
+    global_evaluate,
+    set_global_seed,
+    set_use_lora,
+    GLOBAL_MODEL_SEED,
+)
 
 app = ServerApp()
 
@@ -17,6 +23,9 @@ def main(grid: Grid, context: Context) -> None:
     fraction_evaluate: float = context.run_config["fraction-evaluate"]
     fraction_train: float = context.run_config["fraction-train"]
     num_rounds: int = context.run_config["num-server-rounds"]
+    stop_mode: str = str(context.run_config.get("stop-mode", "num_rounds"))
+    target_accuracy: float = float(
+        context.run_config.get("target-accuracy", 0.9))
     lr: float = context.run_config["learning-rate"]
     weight_decay: float = context.run_config.get("weight-decay", 0.01)
     warmup_ratio: float = context.run_config.get("warmup-ratio", 0.1)
@@ -29,17 +38,45 @@ def main(grid: Grid, context: Context) -> None:
     async_evaluate_interval: int = context.run_config.get(
         "async-evaluate-interval", 4)
     async_buffer_size: int = context.run_config.get("async-buffer-size", 4)
+    min_train_nodes: int = int(context.run_config.get("min-train-nodes", 8))
+    min_evaluate_nodes: int = int(
+        context.run_config.get("min-evaluate-nodes", 8))
+    min_available_nodes: int = int(
+        context.run_config.get("min-available-nodes", 8))
     async_strategy: str = str(
         context.run_config.get("async-strategy", "immediate")
     ).lower()
+    lr_decay_interval: int = int(
+        context.run_config.get("lr-decay-interval", 20))
+    lr_decay_factor: float = float(
+        context.run_config.get("lr-decay-factor", 0.9))
+    min_learning_rate: float = float(
+        context.run_config.get("min-learning-rate", 1e-4))
+    default_staleness_mode = (
+        "fedstaleweight"
+        if async_strategy in {"buffered", "buffer"}
+        else "polynomial"
+    )
+    staleness_weighting_mode: str = str(
+        context.run_config.get(
+            "staleness-weighting-mode", default_staleness_mode)
+    ).lower()
+    fedstaleweight_ema_beta: float = float(
+        context.run_config.get("fedstaleweight-ema-beta", 0.8))
     staleness_weighting_enabled: bool = bool(
         context.run_config.get("staleness-weighting-enabled", False)
     )
     staleness_exponent: float = float(
         context.run_config.get("staleness-exponent", 1.0)
     )
+    use_lora: bool = bool(context.run_config.get("use-lora", True))
+    run_config_snapshot = dict(context.run_config)
+    wandb_run_name: str = str(context.run_config.get("wandb-run-name", ""))
 
-    global_model = DistilBertAgNewsClassifier()
+    # Seed before creating global model for deterministic initialization
+    set_global_seed(GLOBAL_MODEL_SEED)
+    set_use_lora(use_lora)
+    global_model = DistilBertAgNewsClassifier(use_lora=use_lora)
     arrays = ArrayRecord(global_model.get_federated_state_dict())
 
     if async_strategy in {"buffered", "buffer"}:
@@ -51,11 +88,17 @@ def main(grid: Grid, context: Context) -> None:
             async_max_in_flight=async_max_in_flight,
             async_evaluate_interval=async_evaluate_interval,
             async_buffer_size=async_buffer_size,
-            min_available_nodes=10,
-            min_train_nodes=10,
-            min_evaluate_nodes=10,
+            lr_decay_interval=lr_decay_interval,
+            lr_decay_factor=lr_decay_factor,
+            min_learning_rate=min_learning_rate,
+            staleness_weighting_mode=staleness_weighting_mode,
+            fedstaleweight_ema_beta=fedstaleweight_ema_beta,
+            min_available_nodes=min_available_nodes,
+            min_train_nodes=min_train_nodes,
+            min_evaluate_nodes=min_evaluate_nodes,
             staleness_weighting_enabled=staleness_weighting_enabled,
             staleness_exponent=staleness_exponent,
+            run_config=run_config_snapshot,
         )
     elif async_strategy in {"immediate", "plain"}:
         strategy = AsyncFedAvgStrategy(
@@ -65,11 +108,17 @@ def main(grid: Grid, context: Context) -> None:
             reply_poll_interval=reply_poll_interval,
             async_max_in_flight=async_max_in_flight,
             async_evaluate_interval=async_evaluate_interval,
-            min_available_nodes=10,
-            min_train_nodes=10,
-            min_evaluate_nodes=10,
+            lr_decay_interval=lr_decay_interval,
+            lr_decay_factor=lr_decay_factor,
+            min_learning_rate=min_learning_rate,
+            staleness_weighting_mode=staleness_weighting_mode,
+            fedstaleweight_ema_beta=fedstaleweight_ema_beta,
+            min_available_nodes=min_available_nodes,
+            min_train_nodes=min_train_nodes,
+            min_evaluate_nodes=min_evaluate_nodes,
             staleness_weighting_enabled=staleness_weighting_enabled,
             staleness_exponent=staleness_exponent,
+            run_config=run_config_snapshot,
         )
     else:
         raise ValueError(
@@ -89,4 +138,7 @@ def main(grid: Grid, context: Context) -> None:
         ),
         num_rounds=num_rounds,
         evaluate_fn=global_evaluate,
+        stop_mode=stop_mode,
+        target_accuracy=target_accuracy,
+        run_name=wandb_run_name or None,
     )

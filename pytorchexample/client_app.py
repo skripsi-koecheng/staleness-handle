@@ -9,7 +9,14 @@ from flwr.clientapp import ClientApp
 from flwr.common import log
 
 from pytorchexample.straggler import compute_straggler, describe_tier_mapping
-from pytorchexample.task import DistilBertAgNewsClassifier, load_data
+from pytorchexample.task import (
+    DistilBertAgNewsClassifier,
+    get_state_dict_bytes,
+    get_state_dict_numel,
+    load_data,
+    set_global_seed,
+    GLOBAL_MODEL_SEED,
+)
 from pytorchexample.task import test as test_fn
 from pytorchexample.task import train as train_fn
 
@@ -22,8 +29,13 @@ def train(msg: Message, context: Context):
     """Train the model on local data."""
 
     # Load the model and initialize it with the received weights
-    model = DistilBertAgNewsClassifier()
-    model.load_federated_state_dict(msg.content["arrays"].to_torch_state_dict())
+    partition_id = context.node_config["partition-id"]
+    # Seed deterministically per client partition
+    set_global_seed(GLOBAL_MODEL_SEED + partition_id)
+    use_lora = bool(context.run_config.get("use-lora", True))
+    model = DistilBertAgNewsClassifier(use_lora=use_lora)
+    model.load_federated_state_dict(
+        msg.content["arrays"].to_torch_state_dict())
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model.to(device)
 
@@ -41,22 +53,30 @@ def train(msg: Message, context: Context):
         context.run_config["local-epochs"],
         msg.content["config"]["lr"],
         device,
+        msg.content["config"].get("weight_decay", 0.01),
+        msg.content["config"].get("warmup_ratio", 0.1),
+        msg.content["config"].get("max_grad_norm", 1.0),
     )
     train_duration = time.perf_counter() - train_start
 
     # Optional deterministic straggler simulation
-    straggler_enabled = bool(context.run_config.get("straggler-enabled", False))
+    straggler_enabled = bool(
+        context.run_config.get("straggler-enabled", False))
     if straggler_enabled:
-        baseline_mode = str(context.run_config.get("baseline-mode", "measured"))
-        scenario = str(context.run_config.get("straggler-scenario", "balanced"))
+        baseline_mode = str(context.run_config.get(
+            "baseline-mode", "measured"))
+        scenario = str(context.run_config.get(
+            "straggler-scenario", "balanced"))
 
         if baseline_mode == "measured":
             baseline_t = train_duration
         else:
-            baseline_t = float(context.run_config.get("baseline-time-seconds", 60.0))
+            baseline_t = float(context.run_config.get(
+                "baseline-time-seconds", 60.0))
 
         if partition_id == 0:
-            log(INFO, "[STRAGGLER] Tier map:\n%s", describe_tier_mapping(num_partitions, scenario))
+            log(INFO, "[STRAGGLER] Tier map:\n%s",
+                describe_tier_mapping(num_partitions, scenario))
 
         sim = compute_straggler(
             partition_id=partition_id,
@@ -86,11 +106,35 @@ def train(msg: Message, context: Context):
             time.sleep(sim.sleep_duration)
 
     # Construct and return reply Message
-    model_record = ArrayRecord(model.get_federated_state_dict())
+    state_dict = model.get_federated_state_dict()
+    comm_params = get_state_dict_numel(state_dict)
+    comm_bytes = get_state_dict_bytes(state_dict)
+    full_bytes = model.get_full_state_bytes()
+    relative_ratio = comm_bytes / full_bytes if full_bytes > 0 else 0.0
+    model_record = ArrayRecord(state_dict)
     metrics = {
         "train_loss": train_loss,
         "num-examples": len(trainloader.dataset),
+        "dispatched-server-round": int(msg.content["config"].get("server-round", 0)),
     }
+    if torch.cuda.is_available():
+        torch.cuda.synchronize(device)
+        metrics.update(
+            {
+                "vram_allocated_mb": torch.cuda.memory_allocated(device)
+                / (1024**2),
+                "vram_reserved_mb": torch.cuda.memory_reserved(device)
+                / (1024**2),
+            }
+        )
+    metrics.update(
+        {
+            "communication_bytes": comm_bytes,
+            "communication_megabytes": comm_bytes / (1024**2),
+            "communication_params": comm_params,
+            "relative_bandwidth_ratio": relative_ratio,
+        }
+    )
     metric_record = MetricRecord(metrics)
     content = RecordDict({"arrays": model_record, "metrics": metric_record})
     return Message(content=content, reply_to=msg)
@@ -101,8 +145,13 @@ def evaluate(msg: Message, context: Context):
     """Evaluate the model on local data."""
 
     # Load the model and initialize it with the received weights
-    model = DistilBertAgNewsClassifier()
-    model.load_federated_state_dict(msg.content["arrays"].to_torch_state_dict())
+    partition_id = context.node_config["partition-id"]
+    # Seed deterministically per client partition
+    set_global_seed(GLOBAL_MODEL_SEED + partition_id)
+    use_lora = bool(context.run_config.get("use-lora", True))
+    model = DistilBertAgNewsClassifier(use_lora=use_lora)
+    model.load_federated_state_dict(
+        msg.content["arrays"].to_torch_state_dict())
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model.to(device)
 

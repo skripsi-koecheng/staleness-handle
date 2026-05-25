@@ -2,7 +2,8 @@ import io
 import time
 from contextlib import suppress
 from logging import INFO
-from typing import Callable, Iterable, Optional
+from pprint import pformat
+from typing import Any, Callable, Iterable, Optional
 
 import torch
 import wandb
@@ -13,8 +14,14 @@ from flwr.serverapp.strategy import FedAvg, Result
 from flwr.serverapp.strategy.strategy_utils import log_strategy_start_info
 
 from pytorchexample.staleness import polynomial_staleness_weight
+from pytorchexample.task import (
+    compute_direction_variation,
+    compute_lora_update_norm,
+    extract_lora_state,
+    get_top1_test_accuracy,
+)
 
-PROJECT_NAME = "FLOWER-advanced-pytorch"
+PROJECT_NAME = "FL LoRA"
 
 
 class AsyncBufferedFedAvgStrategy(FedAvg):
@@ -28,8 +35,14 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
         async_max_in_flight: int = 4,
         async_evaluate_interval: int = 1,
         async_buffer_size: int = 4,
+        lr_decay_interval: int = 20,
+        lr_decay_factor: float = 0.9,
+        min_learning_rate: float = 1e-4,
+        staleness_weighting_mode: str = "fedstaleweight",
+        fedstaleweight_ema_beta: float = 0.8,
         staleness_weighting_enabled: bool = False,
         staleness_exponent: float = 1.0,
+        run_config: Optional[dict[str, Any]] = None,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
@@ -38,8 +51,70 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
         self.async_max_in_flight = max(1, async_max_in_flight)
         self.async_evaluate_interval = max(1, async_evaluate_interval)
         self.async_buffer_size = max(1, async_buffer_size)
+        self.lr_decay_interval = max(1, lr_decay_interval)
+        self.lr_decay_factor = min(1.0, max(0.0, lr_decay_factor))
+        self.min_learning_rate = max(0.0, min_learning_rate)
+        self.staleness_weighting_mode = str(
+            staleness_weighting_mode).strip().lower()
+        self.fedstaleweight_ema_beta = min(
+            0.99, max(0.0, fedstaleweight_ema_beta))
         self.staleness_weighting_enabled = staleness_weighting_enabled
         self.staleness_exponent = staleness_exponent
+        self.client_staleness_ema: dict[int, float] = {}
+        self.run_config = dict(run_config) if run_config is not None else {}
+
+    def _log_run_config(
+        self,
+        stage: str,
+        step: int,
+        train_config: Optional[ConfigRecord],
+    ) -> None:
+        if stage == "start":
+            config_payload: dict[str, Any] = {}
+            if self.run_config:
+                config_payload.update(
+                    {f"run_config.{k}": v for k, v in self.run_config.items()}
+                )
+            if train_config is not None:
+                config_payload.update(
+                    {f"train_config.{k}": v for k,
+                        v in dict(train_config).items()}
+                )
+            if config_payload:
+                wandb.config.update(config_payload, allow_val_change=True)
+
+        log(INFO, "[CONFIG-%s] run_config=%s",
+            stage.upper(), pformat(self.run_config))
+        if train_config is not None:
+            log(
+                INFO,
+                "[CONFIG-%s] train_config=%s",
+                stage.upper(),
+                pformat(dict(train_config)),
+            )
+
+    def _maybe_decay_lr(self, global_updates_done: int, train_config: ConfigRecord) -> None:
+        if global_updates_done <= 0 or global_updates_done % self.lr_decay_interval != 0:
+            return
+        if self.lr_decay_factor >= 1.0:
+            return
+
+        current_lr = float(train_config.get("lr", 0.0))
+        if current_lr <= self.min_learning_rate:
+            return
+
+        new_lr = max(self.min_learning_rate, current_lr * self.lr_decay_factor)
+        if new_lr >= current_lr:
+            return
+
+        train_config["lr"] = new_lr
+        log(
+            INFO,
+            "[ASYNC-BUFFERED] LR decayed at global update %s: %.6f -> %.6f",
+            global_updates_done,
+            current_lr,
+            new_lr,
+        )
 
     def _extract_train_reply(
         self,
@@ -58,25 +133,49 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
 
         return client_arrays, client_metrics, client_weight
 
+    def _update_staleness_ema(self, node_id: int, tau: int) -> float:
+        previous = self.client_staleness_ema.get(node_id, float(tau))
+        updated = (
+            self.fedstaleweight_ema_beta * previous
+            + (1.0 - self.fedstaleweight_ema_beta) * float(tau)
+        )
+        self.client_staleness_ema[node_id] = updated
+        return updated
+
     def _aggregate_buffered_replies(
         self,
-        buffered_replies: list[tuple[Message, int]],
+        buffered_replies: list[tuple[Message, int, float]],
     ) -> tuple[Optional[ArrayRecord], Optional[MetricRecord], int]:
         if not buffered_replies:
             return None, None, 0
 
-        # valid_updates: (client_arrays, client_metrics, effective_weight, tau, staleness_weight)
-        valid_updates: list[tuple[ArrayRecord, MetricRecord, float, int, float]] = []
-        for reply, tau in buffered_replies:
-            client_arrays, client_metrics, num_examples = self._extract_train_reply(reply)
+        # valid_updates: (client_arrays, client_metrics, effective_weight, expected_staleness, fairness_boost)
+        valid_updates: list[tuple[ArrayRecord,
+                                  MetricRecord, float, float, float]] = []
+        valid_taus: list[int] = []
+        for reply, tau, expected_staleness in buffered_replies:
+            client_arrays, client_metrics, num_examples = self._extract_train_reply(
+                reply)
             if client_arrays is not None and client_metrics is not None and num_examples > 0:
                 if self.staleness_weighting_enabled:
-                    sw = polynomial_staleness_weight(tau, self.staleness_exponent)
-                    effective_weight = num_examples * sw
+                    if self.staleness_weighting_mode in {"fedstaleweight", "fair"}:
+                        fairness_boost = 1.0 + \
+                            (max(0.0, expected_staleness) /
+                             max(1, self.async_buffer_size))
+                    elif self.staleness_weighting_mode in {"polynomial", "poly"}:
+                        fairness_boost = polynomial_staleness_weight(
+                            tau, self.staleness_exponent)
+                    else:
+                        raise ValueError(
+                            "Invalid staleness-weighting-mode. Use 'polynomial' or 'fedstaleweight'."
+                        )
+                    effective_weight = num_examples * fairness_boost
                 else:
-                    sw = 1.0
+                    fairness_boost = 1.0
                     effective_weight = num_examples
-                valid_updates.append((client_arrays, client_metrics, effective_weight, tau, sw))
+                valid_updates.append(
+                    (client_arrays, client_metrics, effective_weight, expected_staleness, fairness_boost))
+                valid_taus.append(tau)
 
         if not valid_updates:
             return None, None, 0
@@ -112,16 +211,38 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
 
         weighted_train_loss = 0.0
         for _, client_metrics, client_weight, _, _ in valid_updates:
-            weighted_train_loss += float(client_metrics.get("train_loss", 0.0)) * client_weight
+            weighted_train_loss += float(
+                client_metrics.get("train_loss", 0.0)) * client_weight
 
         metrics_dict: dict = {
             "train_loss": weighted_train_loss / total_weight,
             self.weighted_by_key: total_weight,
             "buffer_size": len(valid_updates),
+            "avg_tau": sum(valid_taus) / len(valid_taus),
         }
         if self.staleness_weighting_enabled:
-            metrics_dict["avg_tau"] = sum(t for _, _, _, t, _ in valid_updates) / len(valid_updates)
-            metrics_dict["avg_staleness_weight"] = sum(sw for _, _, _, _, sw in valid_updates) / len(valid_updates)
+            metrics_dict["avg_expected_staleness"] = sum(
+                t for _, _, _, t, _ in valid_updates) / len(valid_updates)
+            metrics_dict["avg_staleness_weight"] = sum(
+                sw for _, _, _, _, sw in valid_updates) / len(valid_updates)
+
+        _scalar_keys = [
+            "communication_bytes",
+            "communication_megabytes",
+            "communication_params",
+            "relative_bandwidth_ratio",
+            "vram_allocated_mb",
+            "vram_reserved_mb",
+            "dispatched-server-round",
+        ]
+        for key in _scalar_keys:
+            values = [
+                float(m.get(key))
+                for _, m, _, _, _ in valid_updates
+                if m.get(key) is not None
+            ]
+            if values:
+                metrics_dict[key] = sum(values) / len(values)
 
         return ArrayRecord(aggregated_state), MetricRecord(metrics_dict), len(valid_updates)
 
@@ -139,20 +260,25 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
         if self.fraction_train == 0.0:
             return []
 
-        if server_round % 5 == 0 and server_round > 0:
-            config["lr"] *= 0.5
-            log(INFO, "LR decreased to: %s", config["lr"])
-
         excluded = set() if exclude_node_ids is None else exclude_node_ids
         available_node_ids = [
             node_id for node_id in grid.get_node_ids() if node_id not in excluded]
         if not available_node_ids:
             return []
 
-        num_to_sample = max(
+        fraction_target = max(
             1, int(len(available_node_ids) * self.fraction_train))
+        min_train_nodes = max(1, int(getattr(self, "min_train_nodes", 1)))
+        num_to_sample = max(fraction_target, min_train_nodes)
         num_to_sample = min(num_to_sample, len(available_node_ids))
         if max_nodes_to_sample is not None:
+            if max_nodes_to_sample < min_train_nodes:
+                log(
+                    INFO,
+                    "[ASYNC-BUFFERED] Sampling capped to %s (< min_train_nodes=%s)",
+                    max_nodes_to_sample,
+                    min_train_nodes,
+                )
             num_to_sample = min(num_to_sample, max_nodes_to_sample)
 
         import random
@@ -203,11 +329,14 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
         evaluate_config: Optional[ConfigRecord] = None,
         evaluate_fn: Optional[Callable[[int, ArrayRecord],
                                        Optional[MetricRecord]]] = None,
+        stop_mode: str = "num_rounds",
+        target_accuracy: float = 0.9,
+        run_name: Optional[str] = None,
     ) -> Result:
         del timeout
         del evaluate_config
 
-        wandb.init(project=PROJECT_NAME)
+        wandb.init(project=PROJECT_NAME, name=run_name or None)
 
         log(INFO, "Starting %s strategy:", self.__class__.__name__)
         log_strategy_start_info(
@@ -218,24 +347,69 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
         train_config = ConfigRecord() if train_config is None else train_config
         result = Result()
         result.arrays = initial_arrays
+        target_mode = str(stop_mode).strip().lower() in {
+            "target_accuracy",
+            "target-accuracy",
+            "target",
+        }
+        evaluation_interval = 1 if target_mode else self.async_evaluate_interval
 
+        self._log_run_config("start", 0, train_config)
+
+        def log_target_metrics(step: int, client_trips: int) -> None:
+            wall_clock_seconds = time.time() - t_start
+            log(
+                INFO,
+                "[TARGET] Top-1 Test Accuracy reached: target=%.4f | client_trips=%d | wall_clock=%.2fs",
+                target_accuracy,
+                client_trips,
+                wall_clock_seconds,
+            )
+            wandb.log(
+                {
+                    "number_of_client_trips_to_target_accuracy": client_trips,
+                    "wall_clock_time_to_target_accuracy": wall_clock_seconds,
+                },
+                step=step,
+            )
+
+        last_step = 0
         try:
             t_start = time.time()
+            last_update_time = time.time()
             arrays = initial_arrays
             next_server_round = 1
+            client_trips_done = 0
+            previous_lora_state = extract_lora_state(
+                initial_arrays.to_torch_state_dict()
+            )
 
             if evaluate_fn is not None:
                 initial_res = evaluate_fn(0, arrays)
                 log(INFO, "Initial global evaluation results: %s", initial_res)
                 if initial_res is not None:
                     result.evaluate_metrics_serverapp[0] = initial_res
+                    initial_log = dict(initial_res)
+                    if "top1_test_accuracy" in initial_log:
+                        initial_log["baseline_top1_test_accuracy"] = initial_log.pop(
+                            "top1_test_accuracy"
+                        )
+                    wandb.log(initial_log, step=0)
+                    if target_mode:
+                        accuracy = get_top1_test_accuracy(initial_res)
+                        if accuracy is not None and accuracy >= target_accuracy:
+                            log_target_metrics(0, client_trips_done)
+                            return result
 
             pending_message_ids: set[str] = set()
             pending_node_ids: set[int] = set()
             message_to_node: dict[str, int] = {}
             message_to_dispatch_update: dict[str, int] = {}
-            buffered_replies: list[tuple[Message, int]] = []
+            buffered_replies: list[tuple[Message, int, float]] = []
+            buffered_update_norms: list[float] = []
             global_updates_done = 0
+            target_logged = False
+            peak_accuracy = 0.0
 
             initial_dispatch = self._dispatch_messages(
                 grid=grid,
@@ -264,8 +438,13 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                         self.train_timeout is not None
                         and (time.monotonic() - last_progress) >= self.train_timeout
                     ):
-                        log(INFO, "[ASYNC-BUFFERED] Idle timeout reached.")
-                        break
+                        log(
+                            INFO,
+                            "[ASYNC-BUFFERED] Idle timeout reached with %s pending replies. Waiting for late clients.",
+                            len(pending_message_ids),
+                        )
+                        last_progress = time.monotonic()
+                        continue
                     time.sleep(self.reply_poll_interval)
                     continue
 
@@ -283,14 +462,25 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                     if client_arrays is None or client_metrics is None or client_weight <= 0:
                         continue
 
-                    dispatch_update = message_to_dispatch_update.pop(reply_to_message_id, 0)
+                    dispatch_update = message_to_dispatch_update.pop(
+                        reply_to_message_id, 0)
                     tau = global_updates_done - dispatch_update
-                    buffered_replies.append((reply, tau))
+                    expected_staleness = self._update_staleness_ema(
+                        node_id if node_id is not None else reply.metadata.src_node_id, tau)
+                    buffered_replies.append((reply, tau, expected_staleness))
+                    _norm = compute_lora_update_norm(
+                        extract_lora_state(
+                            client_arrays.to_torch_state_dict()),
+                        extract_lora_state(arrays.to_torch_state_dict()),
+                    )
+                    if _norm is not None:
+                        buffered_update_norms.append(_norm)
                     log(
                         INFO,
-                        "[ASYNC-BUFFERED] buffered reply from node %s tau=%d (%s/%s)",
+                        "[ASYNC-BUFFERED] buffered reply from node %s tau=%d ema=%.3f (%s/%s)",
                         reply.metadata.src_node_id,
                         tau,
+                        expected_staleness,
                         len(buffered_replies),
                         self.async_buffer_size,
                     )
@@ -299,14 +489,41 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                         agg_arrays, agg_metrics, consumed = self._aggregate_buffered_replies(
                             buffered_replies)
                         buffered_replies = []
+                        avg_update_norm = (
+                            sum(buffered_update_norms) /
+                            len(buffered_update_norms)
+                            if buffered_update_norms else None
+                        )
+                        buffered_update_norms = []
 
                         if agg_arrays is not None and agg_metrics is not None and consumed > 0:
                             global_updates_done += 1
+                            last_step = global_updates_done
+                            client_trips_done += consumed
                             arrays = agg_arrays
                             result.arrays = agg_arrays
                             result.train_metrics_clientapp[global_updates_done] = agg_metrics
-                            wandb.log(dict(agg_metrics),
-                                      step=global_updates_done)
+                            self._maybe_decay_lr(
+                                global_updates_done, train_config)
+                            current_state = arrays.to_torch_state_dict()
+                            direction_variation = compute_direction_variation(
+                                current_state,
+                                previous_lora_state,
+                            )
+                            previous_lora_state = extract_lora_state(
+                                current_state)
+
+                            now = time.time()
+                            round_duration = now - last_update_time
+                            last_update_time = now
+
+                            log_dict = dict(agg_metrics)
+                            log_dict["round_duration"] = round_duration
+                            if avg_update_norm is not None:
+                                log_dict["avg_client_update_norm"] = avg_update_norm
+                            if direction_variation is not None:
+                                log_dict["direction_variation"] = direction_variation
+                            wandb.log(log_dict, step=global_updates_done)
                             log(
                                 INFO,
                                 "[ASYNC-BUFFERED AGG %s/%s] applied buffered FedAvg with %s replies",
@@ -315,7 +532,7 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                                 consumed,
                             )
 
-                            if evaluate_fn is not None and global_updates_done % self.async_evaluate_interval == 0:
+                            if evaluate_fn is not None and global_updates_done % evaluation_interval == 0:
                                 eval_res = evaluate_fn(
                                     global_updates_done, arrays)
                                 log(INFO, "\t└──> MetricRecord: %s", eval_res)
@@ -323,6 +540,18 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                                     result.evaluate_metrics_serverapp[global_updates_done] = eval_res
                                     wandb.log(dict(eval_res),
                                               step=global_updates_done)
+                                    accuracy = get_top1_test_accuracy(eval_res)
+                                    if accuracy is not None and accuracy > peak_accuracy:
+                                        peak_accuracy = accuracy
+                                        wandb.run.summary["peak_top1_test_accuracy"] = accuracy
+                                        wandb.run.summary["peak_accuracy_step"] = global_updates_done
+                                        wandb.run.summary["peak_accuracy_wall_clock_seconds"] = time.time() - t_start
+                                    if accuracy is not None and accuracy >= target_accuracy:
+                                        if not target_logged:
+                                            target_logged = True
+                                            log_target_metrics(global_updates_done, client_trips_done)
+                                        if target_mode:
+                                            return result
 
                             if global_updates_done >= max(1, num_rounds):
                                 break
@@ -348,19 +577,55 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
             if buffered_replies and global_updates_done < max(1, num_rounds):
                 agg_arrays, agg_metrics, consumed = self._aggregate_buffered_replies(
                     buffered_replies)
+                avg_update_norm = (
+                    sum(buffered_update_norms) / len(buffered_update_norms)
+                    if buffered_update_norms else None
+                )
                 if agg_arrays is not None and agg_metrics is not None and consumed > 0:
                     global_updates_done += 1
+                    last_step = global_updates_done
+                    client_trips_done += consumed
                     arrays = agg_arrays
                     result.arrays = agg_arrays
                     result.train_metrics_clientapp[global_updates_done] = agg_metrics
-                    wandb.log(dict(agg_metrics), step=global_updates_done)
+                    self._maybe_decay_lr(global_updates_done, train_config)
+                    current_state = arrays.to_torch_state_dict()
+                    direction_variation = compute_direction_variation(
+                        current_state,
+                        previous_lora_state,
+                    )
+                    previous_lora_state = extract_lora_state(current_state)
 
-                    if evaluate_fn is not None and global_updates_done % self.async_evaluate_interval == 0:
+                    now = time.time()
+                    round_duration = now - last_update_time
+                    last_update_time = now
+
+                    log_dict = dict(agg_metrics)
+                    log_dict["round_duration"] = round_duration
+                    if avg_update_norm is not None:
+                        log_dict["avg_client_update_norm"] = avg_update_norm
+                    if direction_variation is not None:
+                        log_dict["direction_variation"] = direction_variation
+                    wandb.log(log_dict, step=global_updates_done)
+
+                    if evaluate_fn is not None and global_updates_done % evaluation_interval == 0:
                         eval_res = evaluate_fn(global_updates_done, arrays)
                         log(INFO, "\t└──> MetricRecord: %s", eval_res)
                         if eval_res is not None:
                             result.evaluate_metrics_serverapp[global_updates_done] = eval_res
                             wandb.log(dict(eval_res), step=global_updates_done)
+                            accuracy = get_top1_test_accuracy(eval_res)
+                            if accuracy is not None and accuracy > peak_accuracy:
+                                peak_accuracy = accuracy
+                                wandb.run.summary["peak_top1_test_accuracy"] = accuracy
+                                wandb.run.summary["peak_accuracy_step"] = global_updates_done
+                                wandb.run.summary["peak_accuracy_wall_clock_seconds"] = time.time() - t_start
+                            if accuracy is not None and accuracy >= target_accuracy:
+                                if not target_logged:
+                                    target_logged = True
+                                    log_target_metrics(global_updates_done, client_trips_done)
+                                if target_mode:
+                                    return result
 
             log(INFO, "")
             log(INFO, "Strategy execution finished in %.2fs", time.time() - t_start)
@@ -374,4 +639,5 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
             return result
         finally:
             with suppress(Exception):
+                self._log_run_config("end", last_step, train_config)
                 wandb.finish()
