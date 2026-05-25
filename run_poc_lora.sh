@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
-
 echo "============================================================"
 echo "PoC Run 1/6: SyncFL + LoRA, 1 client, 1 round"
 echo "============================================================"

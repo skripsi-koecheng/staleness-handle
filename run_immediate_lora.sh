@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
-
 echo "============================================================"
 echo "Run 10/15: Async Immediate + LoRA, Unweighted, Balanced"
 echo "============================================================"
