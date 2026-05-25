@@ -107,7 +107,7 @@ class _SynchronousBase:
                         current_lr,
                         new_lr,
                     )
-        # Pass the updated config and the rest of arguments to the parent class
+        config["server-round"] = server_round
         return super().configure_train(server_round, arrays, config, grid)
 
     def start(
@@ -192,9 +192,11 @@ class _SynchronousBase:
                             return result
 
             arrays = initial_arrays
+            target_logged = False
 
             for current_round in range(1, num_rounds + 1):
                 last_step = current_round
+                t_round_start = time.time()
                 log(INFO, "")
                 log(INFO, "[ROUND %s/%s]", current_round, num_rounds)
 
@@ -284,12 +286,17 @@ class _SynchronousBase:
                         result.evaluate_metrics_serverapp[current_round] = res
                         # Log to W&B
                         wandb.log(dict(res), step=current_round)
-                        if target_mode:
-                            accuracy = get_top1_test_accuracy(res)
-                            if accuracy is not None and accuracy >= target_accuracy:
-                                log_target_metrics(
-                                    current_round, client_trips_done)
+                        accuracy = get_top1_test_accuracy(res)
+                        if accuracy is not None and accuracy >= target_accuracy:
+                            if not target_logged:
+                                target_logged = True
+                                log_target_metrics(current_round, client_trips_done)
+                            if target_mode:
                                 return result
+
+                round_duration = time.time() - t_round_start
+                log(INFO, "[ROUND %s] duration=%.2fs", current_round, round_duration)
+                wandb.log({"round_duration": round_duration}, step=current_round)
 
             log(INFO, "")
             log(INFO, "Strategy execution finished in %.2fs", time.time() - t_start)

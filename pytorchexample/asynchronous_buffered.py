@@ -223,7 +223,7 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
         if self.staleness_weighting_enabled:
             metrics_dict["avg_expected_staleness"] = sum(
                 t for _, _, _, t, _ in valid_updates) / len(valid_updates)
-            metrics_dict["avg_fairness_boost"] = sum(
+            metrics_dict["avg_staleness_weight"] = sum(
                 sw for _, _, _, _, sw in valid_updates) / len(valid_updates)
 
         _scalar_keys = [
@@ -233,6 +233,7 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
             "relative_bandwidth_ratio",
             "vram_allocated_mb",
             "vram_reserved_mb",
+            "dispatched-server-round",
         ]
         for key in _scalar_keys:
             values = [
@@ -407,6 +408,7 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
             buffered_replies: list[tuple[Message, int, float]] = []
             buffered_update_norms: list[float] = []
             global_updates_done = 0
+            target_logged = False
 
             initial_dispatch = self._dispatch_messages(
                 grid=grid,
@@ -537,12 +539,12 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                                     result.evaluate_metrics_serverapp[global_updates_done] = eval_res
                                     wandb.log(dict(eval_res),
                                               step=global_updates_done)
-                                    if target_mode:
-                                        accuracy = get_top1_test_accuracy(
-                                            eval_res)
-                                        if accuracy is not None and accuracy >= target_accuracy:
-                                            log_target_metrics(
-                                                global_updates_done, client_trips_done)
+                                    accuracy = get_top1_test_accuracy(eval_res)
+                                    if accuracy is not None and accuracy >= target_accuracy:
+                                        if not target_logged:
+                                            target_logged = True
+                                            log_target_metrics(global_updates_done, client_trips_done)
+                                        if target_mode:
                                             return result
 
                             if global_updates_done >= max(1, num_rounds):
@@ -606,11 +608,12 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                         if eval_res is not None:
                             result.evaluate_metrics_serverapp[global_updates_done] = eval_res
                             wandb.log(dict(eval_res), step=global_updates_done)
-                            if target_mode:
-                                accuracy = get_top1_test_accuracy(eval_res)
-                                if accuracy is not None and accuracy >= target_accuracy:
-                                    log_target_metrics(
-                                        global_updates_done, client_trips_done)
+                            accuracy = get_top1_test_accuracy(eval_res)
+                            if accuracy is not None and accuracy >= target_accuracy:
+                                if not target_logged:
+                                    target_logged = True
+                                    log_target_metrics(global_updates_done, client_trips_done)
+                                if target_mode:
                                     return result
 
             log(INFO, "")

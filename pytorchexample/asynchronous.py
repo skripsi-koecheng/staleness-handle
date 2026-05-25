@@ -207,7 +207,7 @@ class AsyncFedAvgStrategy(FedAvg):
         if current_total_weight <= 0:
             if self.staleness_weighting_enabled:
                 client_metrics = MetricRecord(
-                    {**client_metrics, "staleness_boost": staleness_boost}
+                    {**client_metrics, "staleness_weight": staleness_boost}
                 )
             if update_norm is not None:
                 client_metrics = MetricRecord(
@@ -223,7 +223,7 @@ class AsyncFedAvgStrategy(FedAvg):
         )
         if self.staleness_weighting_enabled:
             client_metrics = MetricRecord(
-                {**client_metrics, "staleness_boost": staleness_boost}
+                {**client_metrics, "staleness_weight": staleness_boost}
             )
         if update_norm is not None:
             client_metrics = MetricRecord(
@@ -364,6 +364,7 @@ class AsyncFedAvgStrategy(FedAvg):
             arrays = initial_arrays
             weighted_examples_seen = 0.0
             client_trips_done = 0
+            target_logged = False
             previous_lora_state = extract_lora_state(
                 initial_arrays.to_torch_state_dict()
             )
@@ -485,7 +486,7 @@ class AsyncFedAvgStrategy(FedAvg):
                         num_examples = float(
                             train_metrics.get(self.weighted_by_key, 0.0))
                         staleness_boost = float(
-                            train_metrics.get("staleness_boost", 1.0))
+                            train_metrics.get("staleness_weight", 1.0))
                         final_weight = num_examples * staleness_boost
                         log(
                             INFO,
@@ -506,11 +507,12 @@ class AsyncFedAvgStrategy(FedAvg):
                         if eval_res is not None:
                             result.evaluate_metrics_serverapp[updates_done] = eval_res
                             wandb.log(dict(eval_res), step=updates_done)
-                            if target_mode:
-                                accuracy = get_top1_test_accuracy(eval_res)
-                                if accuracy is not None and accuracy >= target_accuracy:
-                                    log_target_metrics(
-                                        updates_done, client_trips_done)
+                            accuracy = get_top1_test_accuracy(eval_res)
+                            if accuracy is not None and accuracy >= target_accuracy:
+                                if not target_logged:
+                                    target_logged = True
+                                    log_target_metrics(updates_done, client_trips_done)
+                                if target_mode:
                                     return result
 
                     if updates_done >= target_updates:

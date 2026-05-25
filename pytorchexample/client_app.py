@@ -115,6 +115,7 @@ def train(msg: Message, context: Context):
     metrics = {
         "train_loss": train_loss,
         "num-examples": len(trainloader.dataset),
+        "dispatched-server-round": int(msg.content["config"].get("server-round", 0)),
     }
     if torch.cuda.is_available():
         torch.cuda.synchronize(device)
