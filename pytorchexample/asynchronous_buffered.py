@@ -409,6 +409,7 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
             buffered_update_norms: list[float] = []
             global_updates_done = 0
             target_logged = False
+            peak_accuracy = 0.0
 
             initial_dispatch = self._dispatch_messages(
                 grid=grid,
@@ -540,6 +541,11 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                                     wandb.log(dict(eval_res),
                                               step=global_updates_done)
                                     accuracy = get_top1_test_accuracy(eval_res)
+                                    if accuracy is not None and accuracy > peak_accuracy:
+                                        peak_accuracy = accuracy
+                                        wandb.run.summary["peak_top1_test_accuracy"] = accuracy
+                                        wandb.run.summary["peak_accuracy_step"] = global_updates_done
+                                        wandb.run.summary["peak_accuracy_wall_clock_seconds"] = time.time() - t_start
                                     if accuracy is not None and accuracy >= target_accuracy:
                                         if not target_logged:
                                             target_logged = True
@@ -609,6 +615,11 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                             result.evaluate_metrics_serverapp[global_updates_done] = eval_res
                             wandb.log(dict(eval_res), step=global_updates_done)
                             accuracy = get_top1_test_accuracy(eval_res)
+                            if accuracy is not None and accuracy > peak_accuracy:
+                                peak_accuracy = accuracy
+                                wandb.run.summary["peak_top1_test_accuracy"] = accuracy
+                                wandb.run.summary["peak_accuracy_step"] = global_updates_done
+                                wandb.run.summary["peak_accuracy_wall_clock_seconds"] = time.time() - t_start
                             if accuracy is not None and accuracy >= target_accuracy:
                                 if not target_logged:
                                     target_logged = True

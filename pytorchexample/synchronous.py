@@ -193,6 +193,7 @@ class _SynchronousBase:
 
             arrays = initial_arrays
             target_logged = False
+            peak_accuracy = 0.0
 
             for current_round in range(1, num_rounds + 1):
                 last_step = current_round
@@ -287,6 +288,11 @@ class _SynchronousBase:
                         # Log to W&B
                         wandb.log(dict(res), step=current_round)
                         accuracy = get_top1_test_accuracy(res)
+                        if accuracy is not None and accuracy > peak_accuracy:
+                            peak_accuracy = accuracy
+                            wandb.run.summary["peak_top1_test_accuracy"] = accuracy
+                            wandb.run.summary["peak_accuracy_step"] = current_round
+                            wandb.run.summary["peak_accuracy_wall_clock_seconds"] = time.time() - t_start
                         if accuracy is not None and accuracy >= target_accuracy:
                             if not target_logged:
                                 target_logged = True
