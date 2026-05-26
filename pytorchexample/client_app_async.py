@@ -55,6 +55,7 @@ def train(msg: Message, context: Context):
     )
     train_duration = time.perf_counter() - train_start
 
+    straggler_metrics: dict = {}
     straggler_enabled = bool(
         context.run_config.get("straggler-enabled", False))
     if straggler_enabled:
@@ -97,6 +98,14 @@ def train(msg: Message, context: Context):
             sim.total_effective_time,
         )
 
+        _tier_to_id = {"FAST": 0, "MEDIUM": 1, "SLOW": 2}
+        straggler_metrics = {
+            "straggler_tier_id": _tier_to_id.get(sim.tier, -1),
+            "straggler_multiplier": sim.multiplier,
+            "straggler_sleep_seconds": sim.sleep_duration,
+            "straggler_total_effective_time": sim.total_effective_time,
+        }
+
         if sim.sleep_duration > 0:
             time.sleep(sim.sleep_duration)
 
@@ -110,6 +119,7 @@ def train(msg: Message, context: Context):
         "train_loss": train_loss,
         "num-examples": len(trainloader.dataset),
         "dispatched-server-round": int(msg.content["config"].get("server-round", 0)),
+        **straggler_metrics,
     }
     if torch.cuda.is_available():
         torch.cuda.synchronize(device)

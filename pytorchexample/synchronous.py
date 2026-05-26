@@ -173,6 +173,10 @@ class _SynchronousBase:
             previous_lora_state = extract_lora_state(
                 initial_arrays.to_torch_state_dict()
             )
+            arrays = initial_arrays
+            target_logged = False
+            peak_accuracy = 0.0
+
             # Evaluate starting global parameters
             if evaluate_fn:
                 res = evaluate_fn(0, initial_arrays)
@@ -185,15 +189,12 @@ class _SynchronousBase:
                             "top1_test_accuracy"
                         )
                     wandb.log(initial_log, step=0)
-                    if target_mode:
-                        accuracy = get_top1_test_accuracy(res)
-                        if accuracy is not None and accuracy >= target_accuracy:
-                            log_target_metrics(0, client_trips_done)
-                            return result
-
-            arrays = initial_arrays
-            target_logged = False
-            peak_accuracy = 0.0
+                    accuracy = get_top1_test_accuracy(res)
+                    if accuracy is not None and accuracy >= target_accuracy and not target_logged:
+                        log_target_metrics(0, client_trips_done)
+                        target_logged = True
+                    if target_mode and accuracy is not None and accuracy >= target_accuracy:
+                        return result
 
             for current_round in range(1, num_rounds + 1):
                 last_step = current_round

@@ -384,6 +384,9 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                 initial_arrays.to_torch_state_dict()
             )
 
+            target_logged = False
+            peak_accuracy = 0.0
+
             if evaluate_fn is not None:
                 initial_res = evaluate_fn(0, arrays)
                 log(INFO, "Initial global evaluation results: %s", initial_res)
@@ -395,11 +398,12 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                             "top1_test_accuracy"
                         )
                     wandb.log(initial_log, step=0)
-                    if target_mode:
-                        accuracy = get_top1_test_accuracy(initial_res)
-                        if accuracy is not None and accuracy >= target_accuracy:
-                            log_target_metrics(0, client_trips_done)
-                            return result
+                    accuracy = get_top1_test_accuracy(initial_res)
+                    if accuracy is not None and accuracy >= target_accuracy and not target_logged:
+                        log_target_metrics(0, client_trips_done)
+                        target_logged = True
+                    if target_mode and accuracy is not None and accuracy >= target_accuracy:
+                        return result
 
             pending_message_ids: set[str] = set()
             pending_node_ids: set[int] = set()
@@ -408,8 +412,6 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
             buffered_replies: list[tuple[Message, int, float]] = []
             buffered_update_norms: list[float] = []
             global_updates_done = 0
-            target_logged = False
-            peak_accuracy = 0.0
 
             initial_dispatch = self._dispatch_messages(
                 grid=grid,

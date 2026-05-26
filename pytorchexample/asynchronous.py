@@ -381,11 +381,12 @@ class AsyncFedAvgStrategy(FedAvg):
                             "top1_test_accuracy"
                         )
                     wandb.log(initial_log, step=0)
-                    if target_mode:
-                        accuracy = get_top1_test_accuracy(initial_res)
-                        if accuracy is not None and accuracy >= target_accuracy:
-                            log_target_metrics(0, client_trips_done)
-                            return result
+                    accuracy = get_top1_test_accuracy(initial_res)
+                    if accuracy is not None and accuracy >= target_accuracy and not target_logged:
+                        log_target_metrics(0, client_trips_done)
+                        target_logged = True
+                    if target_mode and accuracy is not None and accuracy >= target_accuracy:
+                        return result
 
             target_updates = max(1, num_rounds)
             updates_done = 0
@@ -415,6 +416,7 @@ class AsyncFedAvgStrategy(FedAvg):
                 log(INFO, "[ASYNC] No train messages dispatched. Exiting.")
                 return result
 
+            _dispatch_miss_total = 0
             last_progress = time.monotonic()
             while updates_done < target_updates:
                 replies = list(grid.pull_messages(list(pending_message_ids)))
@@ -442,6 +444,9 @@ class AsyncFedAvgStrategy(FedAvg):
                     if node_id is not None:
                         pending_node_ids.discard(node_id)
 
+                    _reply_id_found = reply_to_message_id in message_to_dispatch_update
+                    if not _reply_id_found:
+                        _dispatch_miss_total += 1
                     dispatch_update = message_to_dispatch_update.pop(
                         reply_to_message_id, 0)
                     tau = updates_done - dispatch_update
@@ -455,6 +460,26 @@ class AsyncFedAvgStrategy(FedAvg):
                     )
                     if agg_arrays is None or train_metrics is None:
                         continue
+
+                    if updates_done < 30:
+                        _raw = reply.content.get("metrics") if reply.has_content() else None
+                        _stier = float(_raw.get("straggler_tier_id", -1)) if _raw else -1.0
+                        _ssleep = float(_raw.get("straggler_sleep_seconds", -1.0)) if _raw else -1.0
+                        log(
+                            INFO,
+                            "[TAU-DEBUG #%d] dispatch_update=%d updates_done_before=%d tau=%d "
+                            "node=%s reply_id_found=%s in_flight=%d "
+                            "straggler_tier_id=%.0f straggler_sleep=%.2fs",
+                            updates_done,
+                            dispatch_update,
+                            updates_done,
+                            tau,
+                            node_id if node_id is not None else reply.metadata.src_node_id,
+                            _reply_id_found,
+                            len(pending_message_ids),
+                            _stier,
+                            _ssleep,
+                        )
 
                     updates_done += 1
                     last_step = updates_done
@@ -539,6 +564,13 @@ class AsyncFedAvgStrategy(FedAvg):
                         message_to_dispatch_update[mid] = updates_done
                     next_server_round += len(refill)
 
+            if _dispatch_miss_total > 0:
+                log(
+                    INFO,
+                    "[TAU-DEBUG] %d/%d reply IDs not found in dispatch map (used default dispatch_update=0)",
+                    _dispatch_miss_total,
+                    updates_done,
+                )
             log(INFO, "")
             log(INFO, "Strategy execution finished in %.2fs", time.time() - t_start)
             log(INFO, "")
