@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 echo "============================================================"
 echo "Async Immediate + LoRA, Unweighted, Balanced, fixed5"
 echo "============================================================"
-./run.sh async "num-server-rounds=150 stop-mode='num_rounds' target-accuracy=0.9 fraction-train=0.025 fraction-evaluate=0.05 local-epochs=1 learning-rate=0.001 batch-size=32 min-train-nodes=8 min-evaluate-nodes=8 min-available-nodes=8 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 use-lora=true async-strategy='immediate' async-max-in-flight=12 async-evaluate-interval=1 train-timeout-seconds=600.0 reply-poll-interval-seconds=2.0 straggler-enabled=true baseline-mode='fixed' baseline-time-seconds=5.0 straggler-scenario='balanced' staleness-weighting-enabled=false wandb-run-name='dbpedia-measured-balance-unweighted-imme'"
+./run.sh async "num-server-rounds=150 stop-mode='num_rounds' target-accuracy=0.9 fraction-train=0.025 fraction-evaluate=0.05 local-epochs=1 learning-rate=0.001 batch-size=32 min-train-nodes=8 min-evaluate-nodes=8 min-available-nodes=8 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 use-lora=true async-strategy='immediate' async-max-in-flight=12 async-evaluate-interval=1 train-timeout-seconds=600.0 reply-poll-interval-seconds=2.0 straggler-enabled=true baseline-mode='measured' baseline-time-seconds=5.0 straggler-scenario='balanced' staleness-weighting-enabled=false wandb-run-name='dbpedia-measured-balance-unweighted-imme'"
 
 # echo "============================================================"
 # echo "Async Immediate + LoRA, Unweighted, Slow Dominant, fixed5"
