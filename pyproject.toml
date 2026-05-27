@@ -61,3 +61,4 @@ staleness-weighting-mode = "fedstaleweight"
 staleness-exponent = 0.5
 fedstaleweight-ema-beta = 0.8
 wandb-run-name = ""
+dirichlet-alpha = 0.25

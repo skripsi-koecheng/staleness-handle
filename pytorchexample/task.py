@@ -4,7 +4,7 @@ from datasets import load_dataset
 from flwr.app import ArrayRecord, MetricRecord
 from flwr_datasets import FederatedDataset
 import torch.nn.functional as F
-from flwr_datasets.partitioner import IidPartitioner
+from flwr_datasets.partitioner import DirichletPartitioner
 from peft import (
     LoraConfig,
     TaskType,
@@ -26,9 +26,10 @@ from transformers import (
     get_linear_schedule_with_warmup,
 )
 
-DATASET_NAME = "sh0416/ag_news"
+DATASET_NAME = "fancyzhx/dbpedia_14"
 MODEL_NAME = "distilbert/distilbert-base-uncased"
-NUM_LABELS = 4
+NUM_LABELS = 14
+DIRICHLET_ALPHA = 0.25
 MAX_LENGTH = 256
 LORA_R = 8
 LORA_ALPHA = 16
@@ -174,7 +175,9 @@ def _collate_batch(batch):
     label_key = next(
         (key for key in LABEL_CANDIDATE_KEYS if key in sample), None)
 
-    if "title" in sample and "description" in sample:
+    if "title" in sample and "content" in sample:
+        texts = [f"{item['title']} {item['content']}" for item in batch]
+    elif "title" in sample and "description" in sample:
         texts = [f"{item['title']} {item['description']}" for item in batch]
     elif text_key is not None:
         texts = [str(item[text_key]) for item in batch]
@@ -213,11 +216,17 @@ def _collate_batch(batch):
     return encoded
 
 
-def load_data(partition_id: int, num_partitions: int, batch_size: int):
-    """Load IID partition of AG News and return local train/val loaders."""
+def load_data(partition_id: int, num_partitions: int, batch_size: int, alpha: float = DIRICHLET_ALPHA):
+    """Load non-IID Dirichlet partition of DBpedia-14 and return local train/val loaders."""
     global fds
     if fds is None:
-        partitioner = IidPartitioner(num_partitions=num_partitions)
+        partitioner = DirichletPartitioner(
+            num_partitions=num_partitions,
+            partition_by="label",
+            alpha=alpha,
+            min_partition_size=10,
+            self_balancing=True,
+        )
         fds = FederatedDataset(
             dataset=DATASET_NAME,
             partitioners={"train": partitioner},
@@ -248,7 +257,7 @@ def load_data(partition_id: int, num_partitions: int, batch_size: int):
 
 
 def load_centralized_dataset():
-    """Load central AG News test split and return dataloader."""
+    """Load central DBpedia-14 test split and return dataloader."""
     test_dataset = load_dataset(DATASET_NAME, split="test")
     return DataLoader(test_dataset, batch_size=128, collate_fn=_collate_batch)
 
@@ -409,7 +418,7 @@ def compute_lora_update_norm(
 
 
 def global_evaluate(server_round: int, arrays: ArrayRecord) -> MetricRecord:
-    """Evaluate model on centralized AG News test data."""
+    """Evaluate model on centralized DBpedia-14 test data."""
     set_global_seed(GLOBAL_MODEL_SEED)
     model = DistilBertAgNewsClassifier()
     model.load_federated_state_dict(arrays.to_torch_state_dict())
