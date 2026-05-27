@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 from datasets import load_dataset
 from flwr.app import ArrayRecord, MetricRecord
-from flwr_datasets import FederatedDataset
 import torch.nn.functional as F
 from flwr_datasets.partitioner import DirichletPartitioner
 from peft import (
@@ -39,7 +38,7 @@ LORA_TARGET_MODULES = ["q_lin", "v_lin"]
 # Default to LoRA enabled unless overridden by config
 USE_LORA = True
 
-fds = None
+_partitioner = None
 tokenizer = None
 
 TEXT_CANDIDATE_KEYS = ["text", "sentence", "content", "article", "description"]
@@ -217,21 +216,24 @@ def _collate_batch(batch):
 
 
 def load_data(partition_id: int, num_partitions: int, batch_size: int, alpha: float = DIRICHLET_ALPHA):
-    """Load non-IID Dirichlet partition of DBpedia-14 and return local train/val loaders."""
-    global fds
-    if fds is None:
-        partitioner = DirichletPartitioner(
+    """Load non-IID Dirichlet partition of 70% stratified DBpedia-14 subset and return local train/val loaders."""
+    global _partitioner
+    if _partitioner is None:
+        full_train = load_dataset(DATASET_NAME, split="train")
+        subset = full_train.train_test_split(
+            train_size=0.7,
+            stratify_by_column="label",
+            seed=GLOBAL_MODEL_SEED,
+        )
+        _partitioner = DirichletPartitioner(
             num_partitions=num_partitions,
             partition_by="label",
             alpha=alpha,
             min_partition_size=10,
             self_balancing=True,
         )
-        fds = FederatedDataset(
-            dataset=DATASET_NAME,
-            partitioners={"train": partitioner},
-        )
-    partition = fds.load_partition(partition_id)
+        _partitioner.dataset = subset["train"]
+    partition = _partitioner.load_partition(partition_id)
     partition_train_test = partition.train_test_split(
         test_size=0.2, seed=GLOBAL_MODEL_SEED + partition_id
     )

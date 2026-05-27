@@ -4,8 +4,8 @@ from dataclasses import dataclass
 
 TIER_MULTIPLIERS: dict[str, float] = {
     "FAST": 1.0,
-    "MEDIUM": 1.5,
-    "SLOW": 3.0,
+    "MEDIUM": 1.25,
+    "SLOW": 1.5,
 }
 
 SCENARIO_PROPORTIONS: dict[str, dict[str, float]] = {
