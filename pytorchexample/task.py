@@ -231,6 +231,7 @@ def load_data(partition_id: int, num_partitions: int, batch_size: int, alpha: fl
             alpha=alpha,
             min_partition_size=10,
             self_balancing=True,
+            seed=GLOBAL_MODEL_SEED,
         )
         _partitioner.dataset = subset["train"]
     partition = _partitioner.load_partition(partition_id)
