@@ -25,9 +25,9 @@ from transformers import (
     get_linear_schedule_with_warmup,
 )
 
-DATASET_NAME = "fancyzhx/dbpedia_14"
+DATASET_NAME = "Yelp/yelp_review_full"
 MODEL_NAME = "distilbert/distilbert-base-uncased"
-NUM_LABELS = 14
+NUM_LABELS = 5
 DIRICHLET_ALPHA = 0.25
 MAX_LENGTH = 256
 LORA_R = 8
@@ -92,7 +92,7 @@ def get_state_dict_bytes(state_dict: dict[str, torch.Tensor]) -> int:
 
 
 class DistilBertAgNewsClassifier(nn.Module):
-    """DistilBERT + LoRA adapter for AG News text classification."""
+    """DistilBERT + LoRA adapter for text classification."""
 
     def __init__(self, use_lora: Optional[bool] = None):
         super().__init__()
@@ -216,12 +216,12 @@ def _collate_batch(batch):
 
 
 def load_data(partition_id: int, num_partitions: int, batch_size: int, alpha: float = DIRICHLET_ALPHA):
-    """Load non-IID Dirichlet partition of 70% stratified DBpedia-14 subset and return local train/val loaders."""
+    """Load non-IID Dirichlet partition of 50% stratified Yelp Review Full subset and return local train/val loaders."""
     global _partitioner
     if _partitioner is None:
         full_train = load_dataset(DATASET_NAME, split="train")
         subset = full_train.train_test_split(
-            train_size=0.7,
+            train_size=0.5,
             stratify_by_column="label",
             seed=GLOBAL_MODEL_SEED,
         )
@@ -260,7 +260,7 @@ def load_data(partition_id: int, num_partitions: int, batch_size: int, alpha: fl
 
 
 def load_centralized_dataset():
-    """Load central DBpedia-14 test split and return dataloader."""
+    """Load central Yelp Review Full test split and return dataloader."""
     test_dataset = load_dataset(DATASET_NAME, split="test")
     return DataLoader(test_dataset, batch_size=128, collate_fn=_collate_batch)
 
