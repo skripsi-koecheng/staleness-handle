@@ -221,7 +221,7 @@ def load_data(partition_id: int, num_partitions: int, batch_size: int, alpha: fl
     if _partitioner is None:
         full_train = load_dataset(DATASET_NAME, split="train")
         subset = full_train.train_test_split(
-            train_size=0.4,
+            train_size=0.3,
             stratify_by_column="label",
             seed=GLOBAL_MODEL_SEED,
         )
