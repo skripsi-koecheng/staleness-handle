@@ -216,12 +216,12 @@ def _collate_batch(batch):
 
 
 def load_data(partition_id: int, num_partitions: int, batch_size: int, alpha: float = DIRICHLET_ALPHA):
-    """Load non-IID Dirichlet partition of 24% stratified Yelp Review Full subset and return local train/val loaders."""
+    """Load non-IID Dirichlet partition of 40% stratified Yelp Review Full subset and return local train/val loaders."""
     global _partitioner
     if _partitioner is None:
         full_train = load_dataset(DATASET_NAME, split="train")
         subset = full_train.train_test_split(
-            train_size=0.24,
+            train_size=0.4,
             stratify_by_column="label",
             seed=GLOBAL_MODEL_SEED,
         )
