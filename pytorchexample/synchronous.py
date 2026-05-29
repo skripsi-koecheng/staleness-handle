@@ -282,12 +282,15 @@ class _SynchronousBase:
                 # Centralized evaluation
                 if evaluate_fn:
                     log(INFO, "Global evaluation")
+                    _eval_t0 = time.time()
                     res = evaluate_fn(current_round, arrays)
+                    _eval_duration = time.time() - _eval_t0
                     log(INFO, "\t└──> MetricRecord: %s", res)
                     if res is not None:
                         result.evaluate_metrics_serverapp[current_round] = res
-                        # Log to W&B
-                        wandb.log(dict(res), step=current_round)
+                        eval_log = dict(res)
+                        eval_log["eval_duration_seconds"] = _eval_duration
+                        wandb.log(eval_log, step=current_round)
                         accuracy = get_top1_test_accuracy(res)
                         if accuracy is not None and accuracy > peak_accuracy:
                             peak_accuracy = accuracy

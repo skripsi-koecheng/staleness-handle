@@ -371,7 +371,9 @@ class AsyncFedAvgStrategy(FedAvg):
             )
 
             if evaluate_fn is not None:
+                _eval_t0 = time.time()
                 initial_res = evaluate_fn(0, arrays)
+                _eval_duration = time.time() - _eval_t0
                 log(INFO, "Initial global evaluation results: %s", initial_res)
                 if initial_res is not None:
                     result.evaluate_metrics_serverapp[0] = initial_res
@@ -380,6 +382,7 @@ class AsyncFedAvgStrategy(FedAvg):
                         initial_log["baseline_top1_test_accuracy"] = initial_log.pop(
                             "top1_test_accuracy"
                         )
+                    initial_log["eval_duration_seconds"] = _eval_duration
                     wandb.log(initial_log, step=0)
                     accuracy = get_top1_test_accuracy(initial_res)
                     if accuracy is not None and accuracy >= target_accuracy and not target_logged:
@@ -528,11 +531,15 @@ class AsyncFedAvgStrategy(FedAvg):
                         updates_done, target_updates, reply.metadata.src_node_id)
 
                     if evaluate_fn is not None and updates_done % evaluation_interval == 0:
+                        _eval_t0 = time.time()
                         eval_res = evaluate_fn(updates_done, arrays)
+                        _eval_duration = time.time() - _eval_t0
                         log(INFO, "\t└──> MetricRecord: %s", eval_res)
                         if eval_res is not None:
                             result.evaluate_metrics_serverapp[updates_done] = eval_res
-                            wandb.log(dict(eval_res), step=updates_done)
+                            eval_log = dict(eval_res)
+                            eval_log["eval_duration_seconds"] = _eval_duration
+                            wandb.log(eval_log, step=updates_done)
                             accuracy = get_top1_test_accuracy(eval_res)
                             if accuracy is not None and accuracy > peak_accuracy:
                                 peak_accuracy = accuracy
