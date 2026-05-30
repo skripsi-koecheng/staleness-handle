@@ -3,7 +3,7 @@ import torch.nn as nn
 from datasets import load_dataset
 from flwr.app import ArrayRecord, MetricRecord
 import torch.nn.functional as F
-from flwr_datasets.partitioner import DirichletPartitioner
+from flwr_datasets.partitioner import IidPartitioner
 from peft import (
     LoraConfig,
     TaskType,
@@ -224,23 +224,12 @@ def _collate_batch(batch):
 
 
 def load_data(partition_id: int, num_partitions: int, batch_size: int, alpha: float = DIRICHLET_ALPHA):
-    """Load non-IID Dirichlet partition of Yelp Review Full and return local train/val loaders."""
+    """Load IID partition of Yelp Review Full and return local train/val loaders."""
     global _partitioner
     if _partitioner is None:
         full_train = load_dataset(DATASET_NAME, split="train")
-        # subset = full_train.train_test_split(
-        #     train_size=1,
-        #     stratify_by_column="label",
-        #     seed=GLOBAL_MODEL_SEED,
-        # )
-        _partitioner = DirichletPartitioner(
-            num_partitions=num_partitions,
-            partition_by="label",
-            alpha=alpha,
-            min_partition_size=10,
-            self_balancing=True,
-            seed=GLOBAL_MODEL_SEED,
-        )
+        _partitioner = IidPartitioner(num_partitions=num_partitions)
+        _partitioner.dataset = full_train
         _partitioner.dataset = full_train
     partition = _partitioner.load_partition(partition_id)
     partition_train_test = partition.train_test_split(
