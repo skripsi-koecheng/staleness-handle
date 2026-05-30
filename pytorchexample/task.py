@@ -3,6 +3,7 @@ import torch.nn as nn
 from datasets import load_dataset
 from flwr.app import ArrayRecord, MetricRecord
 import torch.nn.functional as F
+from flwr_datasets import FederatedDataset
 from flwr_datasets.partitioner import IidPartitioner
 from peft import (
     LoraConfig,
@@ -38,7 +39,7 @@ LORA_TARGET_MODULES = ["q_lin", "v_lin"]
 # Default to LoRA enabled unless overridden by config
 USE_LORA = True
 
-_partitioner = None
+_fds = None
 tokenizer = None
 
 TEXT_CANDIDATE_KEYS = ["text", "sentence", "content", "article", "description"]
@@ -225,13 +226,13 @@ def _collate_batch(batch):
 
 def load_data(partition_id: int, num_partitions: int, batch_size: int, alpha: float = DIRICHLET_ALPHA):
     """Load IID partition of Yelp Review Full and return local train/val loaders."""
-    global _partitioner
-    if _partitioner is None:
-        full_train = load_dataset(DATASET_NAME, split="train")
-        _partitioner = IidPartitioner(num_partitions=num_partitions)
-        _partitioner.dataset = full_train
-        _partitioner.dataset = full_train
-    partition = _partitioner.load_partition(partition_id)
+    global _fds
+    if _fds is None:
+        _fds = FederatedDataset(
+            dataset=DATASET_NAME,
+            partitioners={"train": IidPartitioner(num_partitions=num_partitions)},
+        )
+    partition = _fds.load_partition(partition_id, "train")
     partition_train_test = partition.train_test_split(
         test_size=0.2, seed=GLOBAL_MODEL_SEED + partition_id
     )
