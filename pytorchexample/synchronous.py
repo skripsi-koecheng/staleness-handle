@@ -170,6 +170,7 @@ class _SynchronousBase:
             last_step = 0
             t_start = time.time()
             client_trips_done = 0
+            client_updates_seen = 0
             previous_lora_state = extract_lora_state(
                 initial_arrays.to_torch_state_dict()
             )
@@ -218,6 +219,23 @@ class _SynchronousBase:
                     timeout=timeout,
                 ))
 
+                for reply in train_replies:
+                    if not reply.has_content():
+                        continue
+                    metrics = reply.content.get("metrics")
+                    if metrics is None:
+                        continue
+                    tier = str(metrics.get("straggler_tier", "")).upper()
+                    if tier not in {"FAST", "MEDIUM", "SLOW"}:
+                        continue
+                    client_updates_seen += 1
+                    if tier == "FAST":
+                        wandb.log({"tau_fast": 0}, step=client_updates_seen)
+                    elif tier == "MEDIUM":
+                        wandb.log({"tau_medium": 0}, step=client_updates_seen)
+                    elif tier == "SLOW":
+                        wandb.log({"tau_slow": 0}, step=client_updates_seen)
+
                 # Aggregate train
                 agg_arrays, agg_train_metrics = self.aggregate_train(
                     current_round,
@@ -240,10 +258,32 @@ class _SynchronousBase:
                             step=current_round,
                         )
                 if agg_train_metrics is not None:
+                    tier_sums = {"FAST": 0.0, "MEDIUM": 0.0, "SLOW": 0.0}
+                    tier_counts = {"FAST": 0, "MEDIUM": 0, "SLOW": 0}
+                    for reply in train_replies:
+                        if not reply.has_content():
+                            continue
+                        metrics = reply.content.get("metrics")
+                        if metrics is None:
+                            continue
+                        tier = str(metrics.get("straggler_tier", "")).upper()
+                        if tier in tier_sums:
+                            tier_counts[tier] += 1
+                    avg_tau_metrics = {}
+                    if tier_counts["FAST"] > 0:
+                        avg_tau_metrics["avg_tau_fast"] = 0.0
+                    if tier_counts["MEDIUM"] > 0:
+                        avg_tau_metrics["avg_tau_medium"] = 0.0
+                    if tier_counts["SLOW"] > 0:
+                        avg_tau_metrics["avg_tau_slow"] = 0.0
+
                     log(INFO, "\t└──> Aggregated MetricRecord: %s", agg_train_metrics)
                     result.train_metrics_clientapp[current_round] = agg_train_metrics
                     # Log to W&B
-                    wandb.log(dict(agg_train_metrics), step=current_round)
+                    log_dict = dict(agg_train_metrics)
+                    if avg_tau_metrics:
+                        log_dict.update(avg_tau_metrics)
+                    wandb.log(log_dict, step=current_round)
                     client_trips_done += len(train_replies)
 
                 # -----------------------------------------------------------------
@@ -293,17 +333,21 @@ class _SynchronousBase:
                             peak_accuracy = accuracy
                             wandb.run.summary["peak_top1_test_accuracy"] = accuracy
                             wandb.run.summary["peak_accuracy_step"] = current_round
-                            wandb.run.summary["peak_accuracy_wall_clock_seconds"] = time.time() - t_start
+                            wandb.run.summary["peak_accuracy_wall_clock_seconds"] = time.time(
+                            ) - t_start
                         if accuracy is not None and accuracy >= target_accuracy:
                             if not target_logged:
                                 target_logged = True
-                                log_target_metrics(current_round, client_trips_done)
+                                log_target_metrics(
+                                    current_round, client_trips_done)
                             if target_mode:
                                 return result
 
                 round_duration = time.time() - t_round_start
-                log(INFO, "[ROUND %s] duration=%.2fs", current_round, round_duration)
-                wandb.log({"round_duration": round_duration}, step=current_round)
+                log(INFO, "[ROUND %s] duration=%.2fs",
+                    current_round, round_duration)
+                wandb.log({"round_duration": round_duration},
+                          step=current_round)
 
             log(INFO, "")
             log(INFO, "Strategy execution finished in %.2fs", time.time() - t_start)

@@ -462,9 +462,12 @@ class AsyncFedAvgStrategy(FedAvg):
                         continue
 
                     if updates_done < 30:
-                        _raw = reply.content.get("metrics") if reply.has_content() else None
-                        _stier = float(_raw.get("straggler_tier_id", -1)) if _raw else -1.0
-                        _ssleep = float(_raw.get("straggler_sleep_seconds", -1.0)) if _raw else -1.0
+                        _raw = reply.content.get(
+                            "metrics") if reply.has_content() else None
+                        _stier = float(
+                            _raw.get("straggler_tier_id", -1)) if _raw else -1.0
+                        _ssleep = float(
+                            _raw.get("straggler_sleep_seconds", -1.0)) if _raw else -1.0
                         log(
                             INFO,
                             "[TAU-DEBUG #%d] dispatch_update=%d updates_done_before=%d tau=%d "
@@ -503,6 +506,13 @@ class AsyncFedAvgStrategy(FedAvg):
                     log_dict = dict(train_metrics)
                     log_dict["round_duration"] = round_duration
                     log_dict["tau"] = tau
+                    tier = str(train_metrics.get("straggler_tier", "")).upper()
+                    if tier == "FAST":
+                        log_dict["tau_fast"] = tau
+                    elif tier == "MEDIUM":
+                        log_dict["tau_medium"] = tau
+                    elif tier == "SLOW":
+                        log_dict["tau_slow"] = tau
                     if direction_variation is not None:
                         log_dict["direction_variation"] = direction_variation
                     if "client_update_norm" in log_dict:
@@ -538,11 +548,13 @@ class AsyncFedAvgStrategy(FedAvg):
                                 peak_accuracy = accuracy
                                 wandb.run.summary["peak_top1_test_accuracy"] = accuracy
                                 wandb.run.summary["peak_accuracy_step"] = updates_done
-                                wandb.run.summary["peak_accuracy_wall_clock_seconds"] = time.time() - t_start
+                                wandb.run.summary["peak_accuracy_wall_clock_seconds"] = time.time(
+                                ) - t_start
                             if accuracy is not None and accuracy >= target_accuracy:
                                 if not target_logged:
                                     target_logged = True
-                                    log_target_metrics(updates_done, client_trips_done)
+                                    log_target_metrics(
+                                        updates_done, client_trips_done)
                                 if target_mode:
                                     return result
 

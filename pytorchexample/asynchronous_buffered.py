@@ -380,6 +380,7 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
             arrays = initial_arrays
             next_server_round = 1
             client_trips_done = 0
+            client_updates_seen = 0
             previous_lora_state = extract_lora_state(
                 initial_arrays.to_torch_state_dict()
             )
@@ -469,6 +470,18 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                     tau = global_updates_done - dispatch_update
                     expected_staleness = self._update_staleness_ema(
                         node_id if node_id is not None else reply.metadata.src_node_id, tau)
+
+                    client_updates_seen += 1
+                    tier = str(client_metrics.get(
+                        "straggler_tier", "")).upper()
+                    if tier == "FAST":
+                        wandb.log({"tau_fast": tau}, step=client_updates_seen)
+                    elif tier == "MEDIUM":
+                        wandb.log({"tau_medium": tau},
+                                  step=client_updates_seen)
+                    elif tier == "SLOW":
+                        wandb.log({"tau_slow": tau}, step=client_updates_seen)
+
                     buffered_replies.append((reply, tau, expected_staleness))
                     _norm = compute_lora_update_norm(
                         extract_lora_state(
@@ -488,6 +501,30 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                     )
 
                     if len(buffered_replies) >= self.async_buffer_size:
+                        tier_sums = {"FAST": 0.0, "MEDIUM": 0.0, "SLOW": 0.0}
+                        tier_counts = {"FAST": 0, "MEDIUM": 0, "SLOW": 0}
+                        for _reply, _tau, _ in buffered_replies:
+                            if not _reply.has_content():
+                                continue
+                            _metrics = _reply.content.get("metrics")
+                            if _metrics is None:
+                                continue
+                            _tier = str(_metrics.get(
+                                "straggler_tier", "")).upper()
+                            if _tier in tier_sums:
+                                tier_sums[_tier] += _tau
+                                tier_counts[_tier] += 1
+                        avg_tau_metrics = {}
+                        if tier_counts["FAST"] > 0:
+                            avg_tau_metrics["avg_tau_fast"] = tier_sums["FAST"] / \
+                                tier_counts["FAST"]
+                        if tier_counts["MEDIUM"] > 0:
+                            avg_tau_metrics["avg_tau_medium"] = tier_sums["MEDIUM"] / \
+                                tier_counts["MEDIUM"]
+                        if tier_counts["SLOW"] > 0:
+                            avg_tau_metrics["avg_tau_slow"] = tier_sums["SLOW"] / \
+                                tier_counts["SLOW"]
+
                         agg_arrays, agg_metrics, consumed = self._aggregate_buffered_replies(
                             buffered_replies)
                         buffered_replies = []
@@ -525,6 +562,8 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                                 log_dict["avg_client_update_norm"] = avg_update_norm
                             if direction_variation is not None:
                                 log_dict["direction_variation"] = direction_variation
+                            if avg_tau_metrics:
+                                log_dict.update(avg_tau_metrics)
                             wandb.log(log_dict, step=global_updates_done)
                             log(
                                 INFO,
@@ -547,11 +586,13 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                                         peak_accuracy = accuracy
                                         wandb.run.summary["peak_top1_test_accuracy"] = accuracy
                                         wandb.run.summary["peak_accuracy_step"] = global_updates_done
-                                        wandb.run.summary["peak_accuracy_wall_clock_seconds"] = time.time() - t_start
+                                        wandb.run.summary["peak_accuracy_wall_clock_seconds"] = time.time(
+                                        ) - t_start
                                     if accuracy is not None and accuracy >= target_accuracy:
                                         if not target_logged:
                                             target_logged = True
-                                            log_target_metrics(global_updates_done, client_trips_done)
+                                            log_target_metrics(
+                                                global_updates_done, client_trips_done)
                                         if target_mode:
                                             return result
 
@@ -577,6 +618,29 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                     break
 
             if buffered_replies and global_updates_done < max(1, num_rounds):
+                tier_sums = {"FAST": 0.0, "MEDIUM": 0.0, "SLOW": 0.0}
+                tier_counts = {"FAST": 0, "MEDIUM": 0, "SLOW": 0}
+                for _reply, _tau, _ in buffered_replies:
+                    if not _reply.has_content():
+                        continue
+                    _metrics = _reply.content.get("metrics")
+                    if _metrics is None:
+                        continue
+                    _tier = str(_metrics.get("straggler_tier", "")).upper()
+                    if _tier in tier_sums:
+                        tier_sums[_tier] += _tau
+                        tier_counts[_tier] += 1
+                avg_tau_metrics = {}
+                if tier_counts["FAST"] > 0:
+                    avg_tau_metrics["avg_tau_fast"] = tier_sums["FAST"] / \
+                        tier_counts["FAST"]
+                if tier_counts["MEDIUM"] > 0:
+                    avg_tau_metrics["avg_tau_medium"] = tier_sums["MEDIUM"] / \
+                        tier_counts["MEDIUM"]
+                if tier_counts["SLOW"] > 0:
+                    avg_tau_metrics["avg_tau_slow"] = tier_sums["SLOW"] / \
+                        tier_counts["SLOW"]
+
                 agg_arrays, agg_metrics, consumed = self._aggregate_buffered_replies(
                     buffered_replies)
                 avg_update_norm = (
@@ -608,6 +672,8 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                         log_dict["avg_client_update_norm"] = avg_update_norm
                     if direction_variation is not None:
                         log_dict["direction_variation"] = direction_variation
+                    if avg_tau_metrics:
+                        log_dict.update(avg_tau_metrics)
                     wandb.log(log_dict, step=global_updates_done)
 
                     if evaluate_fn is not None and global_updates_done % evaluation_interval == 0:
@@ -621,11 +687,13 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                                 peak_accuracy = accuracy
                                 wandb.run.summary["peak_top1_test_accuracy"] = accuracy
                                 wandb.run.summary["peak_accuracy_step"] = global_updates_done
-                                wandb.run.summary["peak_accuracy_wall_clock_seconds"] = time.time() - t_start
+                                wandb.run.summary["peak_accuracy_wall_clock_seconds"] = time.time(
+                                ) - t_start
                             if accuracy is not None and accuracy >= target_accuracy:
                                 if not target_logged:
                                     target_logged = True
-                                    log_target_metrics(global_updates_done, client_trips_done)
+                                    log_target_metrics(
+                                        global_updates_done, client_trips_done)
                                 if target_mode:
                                     return result
 

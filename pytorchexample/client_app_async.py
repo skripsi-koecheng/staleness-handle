@@ -14,8 +14,10 @@ from pytorchexample.task import (
     get_state_dict_bytes,
     get_state_dict_numel,
     load_data,
+    set_max_length,
     set_global_seed,
     GLOBAL_MODEL_SEED,
+    MAX_LENGTH,
 )
 from pytorchexample.task import test as test_fn
 from pytorchexample.task import train as train_fn
@@ -30,6 +32,7 @@ def train(msg: Message, context: Context):
     partition_id = context.node_config["partition-id"]
     # Seed deterministically per client partition
     set_global_seed(GLOBAL_MODEL_SEED + partition_id)
+    set_max_length(int(context.run_config.get("max-length", MAX_LENGTH)))
     use_lora = bool(context.run_config.get("use-lora", True))
     model = DistilBertAgNewsClassifier(use_lora=use_lora)
     model.load_federated_state_dict(
@@ -41,7 +44,8 @@ def train(msg: Message, context: Context):
     num_partitions = context.node_config["num-partitions"]
     batch_size = context.run_config["batch-size"]
     dirichlet_alpha = float(context.run_config.get("dirichlet-alpha", 0.25))
-    trainloader, _ = load_data(partition_id, num_partitions, batch_size, dirichlet_alpha)
+    trainloader, _ = load_data(
+        partition_id, num_partitions, batch_size, dirichlet_alpha)
 
     train_start = time.perf_counter()
     train_loss = train_fn(
@@ -99,10 +103,13 @@ def train(msg: Message, context: Context):
             sim.total_effective_time,
         )
 
+        tier_id = {"FAST": 0, "MEDIUM": 1, "SLOW": 2}.get(sim.tier, -1)
         straggler_metrics = {
             "straggler_multiplier": sim.multiplier,
             "straggler_sleep_seconds": sim.sleep_duration,
             "straggler_total_effective_time": sim.total_effective_time,
+            "straggler_tier": sim.tier,
+            "straggler_tier_id": tier_id,
         }
 
         if sim.sleep_duration > 0:
@@ -150,6 +157,7 @@ def evaluate(msg: Message, context: Context):
     partition_id = context.node_config["partition-id"]
     # Seed deterministically per client partition
     set_global_seed(GLOBAL_MODEL_SEED + partition_id)
+    set_max_length(int(context.run_config.get("max-length", MAX_LENGTH)))
     use_lora = bool(context.run_config.get("use-lora", True))
     model = DistilBertAgNewsClassifier(use_lora=use_lora)
     model.load_federated_state_dict(
@@ -161,7 +169,8 @@ def evaluate(msg: Message, context: Context):
     num_partitions = context.node_config["num-partitions"]
     batch_size = context.run_config["batch-size"]
     dirichlet_alpha = float(context.run_config.get("dirichlet-alpha", 0.25))
-    _, valloader = load_data(partition_id, num_partitions, batch_size, dirichlet_alpha)
+    _, valloader = load_data(
+        partition_id, num_partitions, batch_size, dirichlet_alpha)
 
     eval_loss, eval_acc = test_fn(model, valloader, device)
 

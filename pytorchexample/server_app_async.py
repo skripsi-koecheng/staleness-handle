@@ -9,8 +9,10 @@ from pytorchexample.task import (
     DistilBertAgNewsClassifier,
     global_evaluate,
     set_global_seed,
+    set_max_length,
     set_use_lora,
     GLOBAL_MODEL_SEED,
+    MAX_LENGTH,
 )
 
 app = ServerApp()
@@ -75,6 +77,7 @@ def main(grid: Grid, context: Context) -> None:
 
     # Seed before creating global model for deterministic initialization
     set_global_seed(GLOBAL_MODEL_SEED)
+    set_max_length(int(context.run_config.get("max-length", MAX_LENGTH)))
     set_use_lora(use_lora)
     global_model = DistilBertAgNewsClassifier(use_lora=use_lora)
     arrays = ArrayRecord(global_model.get_federated_state_dict())
