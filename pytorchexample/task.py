@@ -66,6 +66,14 @@ def set_use_lora(enabled: bool) -> None:
     USE_LORA = bool(enabled)
 
 
+def set_max_length(max_length: int) -> None:
+    global MAX_LENGTH
+    max_length = int(max_length)
+    if max_length <= 0:
+        raise ValueError("max_length must be positive")
+    MAX_LENGTH = max_length
+
+
 def seed_worker(worker_id):
     worker_seed = GLOBAL_MODEL_SEED + worker_id
     np.random.seed(worker_seed)

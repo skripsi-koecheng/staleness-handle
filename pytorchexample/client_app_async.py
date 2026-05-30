@@ -14,8 +14,10 @@ from pytorchexample.task import (
     get_state_dict_bytes,
     get_state_dict_numel,
     load_data,
+    set_max_length,
     set_global_seed,
     GLOBAL_MODEL_SEED,
+    MAX_LENGTH,
 )
 from pytorchexample.task import test as test_fn
 from pytorchexample.task import train as train_fn
@@ -30,6 +32,7 @@ def train(msg: Message, context: Context):
     partition_id = context.node_config["partition-id"]
     # Seed deterministically per client partition
     set_global_seed(GLOBAL_MODEL_SEED + partition_id)
+    set_max_length(int(context.run_config.get("max-length", MAX_LENGTH)))
     use_lora = bool(context.run_config.get("use-lora", True))
     model = DistilBertAgNewsClassifier(use_lora=use_lora)
     model.load_federated_state_dict(
@@ -150,6 +153,7 @@ def evaluate(msg: Message, context: Context):
     partition_id = context.node_config["partition-id"]
     # Seed deterministically per client partition
     set_global_seed(GLOBAL_MODEL_SEED + partition_id)
+    set_max_length(int(context.run_config.get("max-length", MAX_LENGTH)))
     use_lora = bool(context.run_config.get("use-lora", True))
     model = DistilBertAgNewsClassifier(use_lora=use_lora)
     model.load_federated_state_dict(
