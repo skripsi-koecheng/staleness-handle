@@ -47,7 +47,8 @@ def train(msg: Message, context: Context):
     num_partitions = context.node_config["num-partitions"]
     batch_size = context.run_config["batch-size"]
     dirichlet_alpha = float(context.run_config.get("dirichlet-alpha", 0.25))
-    trainloader, _ = load_data(partition_id, num_partitions, batch_size, dirichlet_alpha)
+    trainloader, _ = load_data(
+        partition_id, num_partitions, batch_size, dirichlet_alpha)
 
     # Train first and measure actual local training duration
     train_start = time.perf_counter()
@@ -173,7 +174,8 @@ def evaluate(msg: Message, context: Context):
     num_partitions = context.node_config["num-partitions"]
     batch_size = context.run_config["batch-size"]
     dirichlet_alpha = float(context.run_config.get("dirichlet-alpha", 0.25))
-    _, valloader = load_data(partition_id, num_partitions, batch_size, dirichlet_alpha)
+    _, valloader = load_data(
+        partition_id, num_partitions, batch_size, dirichlet_alpha)
 
     # Call the evaluation function
     eval_loss, eval_acc = test_fn(
