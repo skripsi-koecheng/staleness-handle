@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 
 echo "============================================================"
 echo "Buff 1/2: Async Buffered + LoRA, Unweighted, Balanced (Non-IID)"
