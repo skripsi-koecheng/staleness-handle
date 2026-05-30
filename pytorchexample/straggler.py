@@ -58,12 +58,23 @@ def compute_straggler(
     baseline_mode: str,
     baseline_T: float,
     train_duration: float,
+    additive_delays: dict[str, float] | None = None,
 ) -> StragglerResult:
-    """Compute delay so completion time approximates multiplier * baseline_T."""
+    """Compute delay based on tier.
+
+    baseline_mode='additive': fixed extra sleep per tier (additive_delays dict).
+    baseline_mode='measured' or 'fixed': sleep = max(0, multiplier * baseline_T - train_duration).
+    """
     tier, multiplier = get_tier(partition_id, total_clients, scenario)
 
-    target = multiplier * baseline_T
-    sleep_duration = max(0.0, target - train_duration)
+    if baseline_mode == "additive":
+        delays = additive_delays or {"FAST": 0.0, "MEDIUM": 10.0, "SLOW": 20.0}
+        sleep_duration = delays.get(tier, 0.0)
+        target = train_duration + sleep_duration
+    else:
+        target = multiplier * baseline_T
+        sleep_duration = max(0.0, target - train_duration)
+
     total_effective = train_duration + sleep_duration
 
     return StragglerResult(
