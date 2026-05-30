@@ -74,11 +74,20 @@ def train(msg: Message, context: Context):
         scenario = str(context.run_config.get(
             "straggler-scenario", "balanced"))
 
-        if baseline_mode == "measured":
-            baseline_t = train_duration
+        if baseline_mode == "additive":
+            baseline_t = 0.0
+            additive_delays = {
+                "FAST": float(context.run_config.get("fast-delay-seconds", 0.0)),
+                "MEDIUM": float(context.run_config.get("medium-delay-seconds", 10.0)),
+                "SLOW": float(context.run_config.get("slow-delay-seconds", 20.0)),
+            }
         else:
-            baseline_t = float(context.run_config.get(
-                "baseline-time-seconds", 60.0))
+            additive_delays = None
+            if baseline_mode == "measured":
+                baseline_t = train_duration
+            else:
+                baseline_t = float(context.run_config.get(
+                    "baseline-time-seconds", 60.0))
 
         if partition_id == 0:
             log(INFO, "[STRAGGLER] Tier map:\n%s",
@@ -91,6 +100,7 @@ def train(msg: Message, context: Context):
             baseline_mode=baseline_mode,
             baseline_T=baseline_t,
             train_duration=train_duration,
+            additive_delays=additive_delays,
         )
 
         log(
