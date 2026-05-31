@@ -151,7 +151,7 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
 
         # valid_updates: (client_arrays, client_metrics, effective_weight, expected_staleness, fairness_boost, raw_num_examples)
         valid_updates: list[tuple[ArrayRecord,
-                      MetricRecord, float, float, float, float]] = []
+                                  MetricRecord, float, float, float, float]] = []
         valid_taus: list[int] = []
         for reply, tau, expected_staleness in buffered_replies:
             client_arrays, client_metrics, num_examples = self._extract_train_reply(

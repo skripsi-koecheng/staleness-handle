@@ -274,7 +274,8 @@ class AsyncFedAvgStrategy(FedAvg):
 
         selection_seed = int(self.run_config.get("selection-seed", 42))
         rng = random.Random(selection_seed + int(server_round))
-        selected_node_ids = rng.sample(sorted(available_node_ids), num_to_sample)
+        selected_node_ids = rng.sample(
+            sorted(available_node_ids), num_to_sample)
 
         config["server-round"] = server_round
         record = RecordDict({self.arrayrecord_key: arrays,
@@ -557,7 +558,8 @@ class AsyncFedAvgStrategy(FedAvg):
                         }
                         for tier_name, tier_taus in tau_by_tier.items():
                             if tier_taus:
-                                staleness_log[f"staleness/mean_tau_{tier_name.lower()}"] = statistics.mean(tier_taus)
+                                staleness_log[f"staleness/mean_tau_{tier_name.lower()}"] = statistics.mean(
+                                    tier_taus)
                         wandb.log(staleness_log, step=updates_done)
 
                     if evaluate_fn is not None and updates_done % evaluation_interval == 0:
