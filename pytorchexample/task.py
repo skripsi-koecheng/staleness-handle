@@ -237,7 +237,7 @@ def load_data(partition_id: int, num_partitions: int, batch_size: int, alpha: fl
             num_partitions=num_partitions,
             partition_by="label",
             alpha=alpha,
-            min_partition_size=50,
+            min_partition_size=10,
             self_balancing=True,
             seed=GLOBAL_MODEL_SEED,
         )
