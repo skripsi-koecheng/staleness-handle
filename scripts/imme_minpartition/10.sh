@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 
 # echo "============================================================"
 # echo "Imme 1/6: Async Immediate + LoRA, Unweighted, Slow Dominant (Non-IID, Additive Delay)"
