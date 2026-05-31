@@ -63,6 +63,7 @@ staleness-exponent = 0.5
 fedstaleweight-ema-beta = 0.8
 wandb-run-name = ""
 dirichlet-alpha = 0.25
+min-partition-size = 10
 fast-delay-seconds = 0.0
 medium-delay-seconds = 10.0
 slow-delay-seconds = 20.0

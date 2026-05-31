@@ -223,7 +223,7 @@ def _collate_batch(batch):
     return encoded
 
 
-def load_data(partition_id: int, num_partitions: int, batch_size: int, alpha: float = DIRICHLET_ALPHA):
+def load_data(partition_id: int, num_partitions: int, batch_size: int, alpha: float = DIRICHLET_ALPHA, min_partition_size: Optional[int] = None):
     """Load non-IID Dirichlet partition of Yelp Review Full and return local train/val loaders."""
     global _partitioner
     if _partitioner is None:
@@ -233,11 +233,12 @@ def load_data(partition_id: int, num_partitions: int, batch_size: int, alpha: fl
         #     stratify_by_column="label",
         #     seed=GLOBAL_MODEL_SEED,
         # )
+        _min_size = 10 if min_partition_size is None else int(min_partition_size)
         _partitioner = DirichletPartitioner(
             num_partitions=num_partitions,
             partition_by="label",
             alpha=alpha,
-            min_partition_size=10,
+            min_partition_size=_min_size,
             self_balancing=True,
             seed=GLOBAL_MODEL_SEED,
         )
