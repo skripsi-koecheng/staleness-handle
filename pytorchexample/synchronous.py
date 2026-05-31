@@ -184,6 +184,9 @@ class _SynchronousBase:
                 if res is not None:
                     result.evaluate_metrics_serverapp[0] = res
                     initial_log = dict(res)
+                    if "eval_loss" in initial_log:
+                        initial_log["global_eval_loss"] = initial_log.pop(
+                            "eval_loss")
                     if "top1_test_accuracy" in initial_log:
                         initial_log["baseline_top1_test_accuracy"] = initial_log.pop(
                             "top1_test_accuracy"
@@ -273,8 +276,12 @@ class _SynchronousBase:
                     log(INFO, "\t└──> Aggregated MetricRecord: %s",
                         agg_evaluate_metrics)
                     result.evaluate_metrics_clientapp[current_round] = agg_evaluate_metrics
-                    # Log to W&B
-                    wandb.log(dict(agg_evaluate_metrics), step=current_round)
+                    # Log to W&B (avoid clash with global eval_loss)
+                    client_eval_log = dict(agg_evaluate_metrics)
+                    if "eval_loss" in client_eval_log:
+                        client_eval_log["client_eval_loss"] = client_eval_log.pop(
+                            "eval_loss")
+                    wandb.log(client_eval_log, step=current_round)
                 # -----------------------------------------------------------------
                 # --- EVALUATION (SERVERAPP-SIDE) ---------------------------------
                 # -----------------------------------------------------------------
@@ -286,26 +293,35 @@ class _SynchronousBase:
                     log(INFO, "\t└──> MetricRecord: %s", res)
                     if res is not None:
                         result.evaluate_metrics_serverapp[current_round] = res
-                        # Log to W&B
-                        wandb.log(dict(res), step=current_round)
+                        # Log to W&B (avoid clash with client eval_loss)
+                        global_eval_log = dict(res)
+                        if "eval_loss" in global_eval_log:
+                            global_eval_log["global_eval_loss"] = global_eval_log.pop(
+                                "eval_loss")
+                        wandb.log(global_eval_log, step=current_round)
                         accuracy = get_top1_test_accuracy(res)
                         if accuracy is not None:
                             if accuracy > peak_accuracy:
                                 peak_accuracy = accuracy
                                 wandb.run.summary["peak_top1_test_accuracy"] = accuracy
                                 wandb.run.summary["peak_accuracy_step"] = current_round
-                                wandb.run.summary["peak_accuracy_wall_clock_seconds"] = time.time() - t_start
-                            wandb.log({"peak_top1_test_accuracy": peak_accuracy}, step=current_round)
+                                wandb.run.summary["peak_accuracy_wall_clock_seconds"] = time.time(
+                                ) - t_start
+                            wandb.log(
+                                {"peak_top1_test_accuracy": peak_accuracy}, step=current_round)
                         if accuracy is not None and accuracy >= target_accuracy:
                             if not target_logged:
                                 target_logged = True
-                                log_target_metrics(current_round, client_trips_done)
+                                log_target_metrics(
+                                    current_round, client_trips_done)
                             if target_mode:
                                 return result
 
                 round_duration = time.time() - t_round_start
-                log(INFO, "[ROUND %s] duration=%.2fs", current_round, round_duration)
-                wandb.log({"round_duration": round_duration}, step=current_round)
+                log(INFO, "[ROUND %s] duration=%.2fs",
+                    current_round, round_duration)
+                wandb.log({"round_duration": round_duration},
+                          step=current_round)
 
             log(INFO, "")
             log(INFO, "Strategy execution finished in %.2fs", time.time() - t_start)

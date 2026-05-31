@@ -393,6 +393,9 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                 if initial_res is not None:
                     result.evaluate_metrics_serverapp[0] = initial_res
                     initial_log = dict(initial_res)
+                    if "eval_loss" in initial_log:
+                        initial_log["global_eval_loss"] = initial_log.pop(
+                            "eval_loss")
                     if "top1_test_accuracy" in initial_log:
                         initial_log["baseline_top1_test_accuracy"] = initial_log.pop(
                             "top1_test_accuracy"
@@ -413,7 +416,8 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
             buffered_update_norms: list[float] = []
             global_updates_done = 0
             tau_history: list[int] = []
-            tau_by_tier: dict[str, list[int]] = {"FAST": [], "MEDIUM": [], "SLOW": []}
+            tau_by_tier: dict[str, list[int]] = {
+                "FAST": [], "MEDIUM": [], "SLOW": []}
 
             initial_dispatch = self._dispatch_messages(
                 grid=grid,
@@ -475,7 +479,8 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
 
                     tau_history.append(tau)
                     _id_to_tier = {0: "FAST", 1: "MEDIUM", 2: "SLOW"}
-                    tier_label = _id_to_tier.get(int(client_metrics.get("straggler_tier_id", -1)), "")
+                    tier_label = _id_to_tier.get(
+                        int(client_metrics.get("straggler_tier_id", -1)), "")
                     if tier_label in tau_by_tier:
                         tau_by_tier[tier_label].append(tau)
                     _norm = compute_lora_update_norm(
@@ -552,8 +557,10 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                                 }
                                 for tier_name, tier_taus in tau_by_tier.items():
                                     if tier_taus:
-                                        staleness_log[f"staleness/tau_{tier_name.lower()}"] = statistics.mean(tier_taus)
-                                wandb.log(staleness_log, step=global_updates_done)
+                                        staleness_log[f"staleness/tau_{tier_name.lower()}"] = statistics.mean(
+                                            tier_taus)
+                                wandb.log(staleness_log,
+                                          step=global_updates_done)
 
                             if evaluate_fn is not None and global_updates_done % evaluation_interval == 0:
                                 eval_res = evaluate_fn(
@@ -561,7 +568,11 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                                 log(INFO, "\t└──> MetricRecord: %s", eval_res)
                                 if eval_res is not None:
                                     result.evaluate_metrics_serverapp[global_updates_done] = eval_res
-                                    wandb.log(dict(eval_res),
+                                    global_eval_log = dict(eval_res)
+                                    if "eval_loss" in global_eval_log:
+                                        global_eval_log["global_eval_loss"] = global_eval_log.pop(
+                                            "eval_loss")
+                                    wandb.log(global_eval_log,
                                               step=global_updates_done)
                                     accuracy = get_top1_test_accuracy(eval_res)
                                     if accuracy is not None:
@@ -569,12 +580,15 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                                             peak_accuracy = accuracy
                                             wandb.run.summary["peak_top1_test_accuracy"] = accuracy
                                             wandb.run.summary["peak_accuracy_step"] = global_updates_done
-                                            wandb.run.summary["peak_accuracy_wall_clock_seconds"] = time.time() - t_start
-                                        wandb.log({"peak_top1_test_accuracy": peak_accuracy}, step=global_updates_done)
+                                            wandb.run.summary["peak_accuracy_wall_clock_seconds"] = time.time(
+                                            ) - t_start
+                                        wandb.log(
+                                            {"peak_top1_test_accuracy": peak_accuracy}, step=global_updates_done)
                                     if accuracy is not None and accuracy >= target_accuracy:
                                         if not target_logged:
                                             target_logged = True
-                                            log_target_metrics(global_updates_done, client_trips_done)
+                                            log_target_metrics(
+                                                global_updates_done, client_trips_done)
                                         if target_mode:
                                             return result
 
@@ -638,19 +652,27 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                         log(INFO, "\t└──> MetricRecord: %s", eval_res)
                         if eval_res is not None:
                             result.evaluate_metrics_serverapp[global_updates_done] = eval_res
-                            wandb.log(dict(eval_res), step=global_updates_done)
+                            global_eval_log = dict(eval_res)
+                            if "eval_loss" in global_eval_log:
+                                global_eval_log["global_eval_loss"] = global_eval_log.pop(
+                                    "eval_loss")
+                            wandb.log(global_eval_log,
+                                      step=global_updates_done)
                             accuracy = get_top1_test_accuracy(eval_res)
                             if accuracy is not None:
                                 if accuracy > peak_accuracy:
                                     peak_accuracy = accuracy
                                     wandb.run.summary["peak_top1_test_accuracy"] = accuracy
                                     wandb.run.summary["peak_accuracy_step"] = global_updates_done
-                                    wandb.run.summary["peak_accuracy_wall_clock_seconds"] = time.time() - t_start
-                                wandb.log({"peak_top1_test_accuracy": peak_accuracy}, step=global_updates_done)
+                                    wandb.run.summary["peak_accuracy_wall_clock_seconds"] = time.time(
+                                    ) - t_start
+                                wandb.log(
+                                    {"peak_top1_test_accuracy": peak_accuracy}, step=global_updates_done)
                             if accuracy is not None and accuracy >= target_accuracy:
                                 if not target_logged:
                                     target_logged = True
-                                    log_target_metrics(global_updates_done, client_trips_done)
+                                    log_target_metrics(
+                                        global_updates_done, client_trips_done)
                                 if target_mode:
                                     return result
 

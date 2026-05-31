@@ -136,7 +136,7 @@ def train(msg: Message, context: Context):
     model_record = ArrayRecord(state_dict)
     metrics = {
         "train_loss": train_loss,
-        "num-examples": len(trainloader.dataset),
+        "num_examples": len(trainloader.dataset),
         "dispatched-server-round": int(msg.content["config"].get("server-round", 0)),
         **straggler_metrics,
     }
@@ -198,7 +198,7 @@ def evaluate(msg: Message, context: Context):
     metrics = {
         "eval_loss": eval_loss,
         "eval_acc": eval_acc,
-        "num-examples": len(valloader.dataset),
+        "num_examples": len(valloader.dataset),
     }
     metric_record = MetricRecord(metrics)
     content = RecordDict({"metrics": metric_record})

@@ -376,6 +376,9 @@ class AsyncFedAvgStrategy(FedAvg):
                 if initial_res is not None:
                     result.evaluate_metrics_serverapp[0] = initial_res
                     initial_log = dict(initial_res)
+                    if "eval_loss" in initial_log:
+                        initial_log["global_eval_loss"] = initial_log.pop(
+                            "eval_loss")
                     if "top1_test_accuracy" in initial_log:
                         initial_log["baseline_top1_test_accuracy"] = initial_log.pop(
                             "top1_test_accuracy"
@@ -393,7 +396,8 @@ class AsyncFedAvgStrategy(FedAvg):
             next_server_round = 1
 
             tau_history: list[int] = []
-            tau_by_tier: dict[str, list[int]] = {"FAST": [], "MEDIUM": [], "SLOW": []}
+            tau_by_tier: dict[str, list[int]] = {
+                "FAST": [], "MEDIUM": [], "SLOW": []}
 
             pending_message_ids: set[str] = set()
             pending_node_ids: set[int] = set()
@@ -465,9 +469,12 @@ class AsyncFedAvgStrategy(FedAvg):
                         continue
 
                     if updates_done < 30:
-                        _raw = reply.content.get("metrics") if reply.has_content() else None
-                        _stier = float(_raw.get("straggler_tier_id", -1)) if _raw else -1.0
-                        _ssleep = float(_raw.get("straggler_sleep_seconds", -1.0)) if _raw else -1.0
+                        _raw = reply.content.get(
+                            "metrics") if reply.has_content() else None
+                        _stier = float(
+                            _raw.get("straggler_tier_id", -1)) if _raw else -1.0
+                        _ssleep = float(
+                            _raw.get("straggler_sleep_seconds", -1.0)) if _raw else -1.0
                         log(
                             INFO,
                             "[TAU-DEBUG #%d] dispatch_update=%d updates_done_before=%d tau=%d "
@@ -505,7 +512,8 @@ class AsyncFedAvgStrategy(FedAvg):
 
                     tau_history.append(tau)
                     _id_to_tier = {0: "FAST", 1: "MEDIUM", 2: "SLOW"}
-                    tier_label = _id_to_tier.get(int(train_metrics.get("straggler_tier_id", -1)), "")
+                    tier_label = _id_to_tier.get(
+                        int(train_metrics.get("straggler_tier_id", -1)), "")
                     if tier_label in tau_by_tier:
                         tau_by_tier[tier_label].append(tau)
 
@@ -543,7 +551,8 @@ class AsyncFedAvgStrategy(FedAvg):
                         }
                         for tier_name, tier_taus in tau_by_tier.items():
                             if tier_taus:
-                                staleness_log[f"staleness/tau_{tier_name.lower()}"] = statistics.mean(tier_taus)
+                                staleness_log[f"staleness/tau_{tier_name.lower()}"] = statistics.mean(
+                                    tier_taus)
                         wandb.log(staleness_log, step=updates_done)
 
                     if evaluate_fn is not None and updates_done % evaluation_interval == 0:
@@ -551,19 +560,26 @@ class AsyncFedAvgStrategy(FedAvg):
                         log(INFO, "\t└──> MetricRecord: %s", eval_res)
                         if eval_res is not None:
                             result.evaluate_metrics_serverapp[updates_done] = eval_res
-                            wandb.log(dict(eval_res), step=updates_done)
+                            global_eval_log = dict(eval_res)
+                            if "eval_loss" in global_eval_log:
+                                global_eval_log["global_eval_loss"] = global_eval_log.pop(
+                                    "eval_loss")
+                            wandb.log(global_eval_log, step=updates_done)
                             accuracy = get_top1_test_accuracy(eval_res)
                             if accuracy is not None:
                                 if accuracy > peak_accuracy:
                                     peak_accuracy = accuracy
                                     wandb.run.summary["peak_top1_test_accuracy"] = accuracy
                                     wandb.run.summary["peak_accuracy_step"] = updates_done
-                                    wandb.run.summary["peak_accuracy_wall_clock_seconds"] = time.time() - t_start
-                                wandb.log({"peak_top1_test_accuracy": peak_accuracy}, step=updates_done)
+                                    wandb.run.summary["peak_accuracy_wall_clock_seconds"] = time.time(
+                                    ) - t_start
+                                wandb.log(
+                                    {"peak_top1_test_accuracy": peak_accuracy}, step=updates_done)
                             if accuracy is not None and accuracy >= target_accuracy:
                                 if not target_logged:
                                     target_logged = True
-                                    log_target_metrics(updates_done, client_trips_done)
+                                    log_target_metrics(
+                                        updates_done, client_trips_done)
                                 if target_mode:
                                     return result
 
