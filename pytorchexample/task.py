@@ -44,7 +44,7 @@ tokenizer = None
 TEXT_CANDIDATE_KEYS = ["text", "sentence", "content", "article", "description"]
 LABEL_CANDIDATE_KEYS = ["label", "labels", "class", "category", "topic"]
 TOP1_TEST_ACCURACY_KEY = "top1_test_accuracy"
-DIR_VARIATION_KEY = "direction_variation"
+DIR_VARIATION_KEY = "direction_similarity"
 
 # Global seed for deterministic runs
 GLOBAL_MODEL_SEED = 42
@@ -400,7 +400,7 @@ def extract_lora_state(
     }
 
 
-def compute_direction_variation(
+def compute_direction_similarity(
     current_state: dict[str, torch.Tensor],
     previous_state: Optional[dict[str, torch.Tensor]],
 ) -> Optional[float]:

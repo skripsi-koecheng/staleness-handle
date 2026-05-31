@@ -15,7 +15,7 @@ from flwr.serverapp.strategy.strategy_utils import log_strategy_start_info
 
 from pytorchexample.staleness import polynomial_staleness_weight
 from pytorchexample.task import (
-    compute_direction_variation,
+    compute_direction_similarity,
     compute_lora_update_norm,
     extract_lora_state,
     get_top1_test_accuracy,
@@ -392,6 +392,9 @@ class AsyncFedAvgStrategy(FedAvg):
             updates_done = 0
             next_server_round = 1
 
+            tau_history: list[int] = []
+            tau_by_tier: dict[str, list[int]] = {"FAST": [], "MEDIUM": [], "SLOW": []}
+
             pending_message_ids: set[str] = set()
             pending_node_ids: set[int] = set()
             message_to_node: dict[str, int] = {}
@@ -490,7 +493,7 @@ class AsyncFedAvgStrategy(FedAvg):
                     self._maybe_decay_lr(updates_done, train_config)
 
                     current_state = arrays.to_torch_state_dict()
-                    direction_variation = compute_direction_variation(
+                    direction_similarity = compute_direction_similarity(
                         current_state,
                         previous_lora_state,
                     )
@@ -500,14 +503,16 @@ class AsyncFedAvgStrategy(FedAvg):
                     round_duration = now - last_update_time
                     last_update_time = now
 
+                    tau_history.append(tau)
+                    tier_label = str(train_metrics.get("straggler_tier", "")).upper()
+                    if tier_label in tau_by_tier:
+                        tau_by_tier[tier_label].append(tau)
+
                     log_dict = dict(train_metrics)
                     log_dict["round_duration"] = round_duration
                     log_dict["tau"] = tau
-                    if direction_variation is not None:
-                        log_dict["direction_variation"] = direction_variation
-                    if "client_update_norm" in log_dict:
-                        log_dict["avg_client_update_norm"] = log_dict.pop(
-                            "client_update_norm")
+                    if direction_similarity is not None:
+                        log_dict["direction_similarity"] = direction_similarity
                     if self.staleness_weighting_enabled:
                         num_examples = float(
                             train_metrics.get(self.weighted_by_key, 0.0))
@@ -526,6 +531,19 @@ class AsyncFedAvgStrategy(FedAvg):
                     wandb.log(log_dict, step=updates_done)
                     log(INFO, "[ASYNC UPDATE %s/%s] integrated reply from node %s",
                         updates_done, target_updates, reply.metadata.src_node_id)
+
+                    if tau_history and updates_done % evaluation_interval == 0:
+                        import statistics
+                        staleness_log = {
+                            "staleness/mean_tau": statistics.mean(tau_history),
+                            "staleness/median_tau": statistics.median(tau_history),
+                            "staleness/max_tau": max(tau_history),
+                            "staleness/tau_dist": wandb.Histogram(tau_history),
+                        }
+                        for tier_name, tier_taus in tau_by_tier.items():
+                            if tier_taus:
+                                staleness_log[f"staleness/tau_{tier_name.lower()}"] = statistics.mean(tier_taus)
+                        wandb.log(staleness_log, step=updates_done)
 
                     if evaluate_fn is not None and updates_done % evaluation_interval == 0:
                         eval_res = evaluate_fn(updates_done, arrays)

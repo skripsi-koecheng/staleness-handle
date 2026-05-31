@@ -15,7 +15,7 @@ from flwr.serverapp.strategy.strategy_utils import log_strategy_start_info
 
 from pytorchexample.staleness import polynomial_staleness_weight
 from pytorchexample.task import (
-    compute_direction_variation,
+    compute_direction_similarity,
     compute_lora_update_norm,
     extract_lora_state,
     get_top1_test_accuracy,
@@ -412,6 +412,8 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
             buffered_replies: list[tuple[Message, int, float]] = []
             buffered_update_norms: list[float] = []
             global_updates_done = 0
+            tau_history: list[int] = []
+            tau_by_tier: dict[str, list[int]] = {"FAST": [], "MEDIUM": [], "SLOW": []}
 
             initial_dispatch = self._dispatch_messages(
                 grid=grid,
@@ -470,6 +472,11 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                     expected_staleness = self._update_staleness_ema(
                         node_id if node_id is not None else reply.metadata.src_node_id, tau)
                     buffered_replies.append((reply, tau, expected_staleness))
+
+                    tau_history.append(tau)
+                    tier_label = str(client_metrics.get("straggler_tier", "")).upper()
+                    if tier_label in tau_by_tier:
+                        tau_by_tier[tier_label].append(tau)
                     _norm = compute_lora_update_norm(
                         extract_lora_state(
                             client_arrays.to_torch_state_dict()),
@@ -508,7 +515,7 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                             self._maybe_decay_lr(
                                 global_updates_done, train_config)
                             current_state = arrays.to_torch_state_dict()
-                            direction_variation = compute_direction_variation(
+                            direction_similarity = compute_direction_similarity(
                                 current_state,
                                 previous_lora_state,
                             )
@@ -523,8 +530,8 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                             log_dict["round_duration"] = round_duration
                             if avg_update_norm is not None:
                                 log_dict["avg_client_update_norm"] = avg_update_norm
-                            if direction_variation is not None:
-                                log_dict["direction_variation"] = direction_variation
+                            if direction_similarity is not None:
+                                log_dict["direction_similarity"] = direction_similarity
                             wandb.log(log_dict, step=global_updates_done)
                             log(
                                 INFO,
@@ -533,6 +540,19 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                                 num_rounds,
                                 consumed,
                             )
+
+                            if tau_history and global_updates_done % evaluation_interval == 0:
+                                import statistics
+                                staleness_log = {
+                                    "staleness/mean_tau": statistics.mean(tau_history),
+                                    "staleness/median_tau": statistics.median(tau_history),
+                                    "staleness/max_tau": max(tau_history),
+                                    "staleness/tau_dist": wandb.Histogram(tau_history),
+                                }
+                                for tier_name, tier_taus in tau_by_tier.items():
+                                    if tier_taus:
+                                        staleness_log[f"staleness/tau_{tier_name.lower()}"] = statistics.mean(tier_taus)
+                                wandb.log(staleness_log, step=global_updates_done)
 
                             if evaluate_fn is not None and global_updates_done % evaluation_interval == 0:
                                 eval_res = evaluate_fn(
@@ -592,7 +612,7 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                     result.train_metrics_clientapp[global_updates_done] = agg_metrics
                     self._maybe_decay_lr(global_updates_done, train_config)
                     current_state = arrays.to_torch_state_dict()
-                    direction_variation = compute_direction_variation(
+                    direction_similarity = compute_direction_similarity(
                         current_state,
                         previous_lora_state,
                     )
@@ -606,8 +626,8 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                     log_dict["round_duration"] = round_duration
                     if avg_update_norm is not None:
                         log_dict["avg_client_update_norm"] = avg_update_norm
-                    if direction_variation is not None:
-                        log_dict["direction_variation"] = direction_variation
+                    if direction_similarity is not None:
+                        log_dict["direction_similarity"] = direction_similarity
                     wandb.log(log_dict, step=global_updates_done)
 
                     if evaluate_fn is not None and global_updates_done % evaluation_interval == 0:

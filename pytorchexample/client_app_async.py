@@ -117,6 +117,7 @@ def train(msg: Message, context: Context):
             "straggler_multiplier": sim.multiplier,
             "straggler_sleep_seconds": sim.sleep_duration,
             "straggler_total_effective_time": sim.total_effective_time,
+            "straggler_tier": sim.tier,
         }
 
         if sim.sleep_duration > 0:

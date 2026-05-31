@@ -13,7 +13,7 @@ from flwr.serverapp.strategy import FedAdagrad, FedAvg, Result
 from flwr.serverapp.strategy.strategy_utils import log_strategy_start_info
 
 from pytorchexample.task import (
-    compute_direction_variation,
+    compute_direction_similarity,
     extract_lora_state,
     get_top1_test_accuracy,
 )
@@ -229,14 +229,14 @@ class _SynchronousBase:
                     result.arrays = agg_arrays
                     arrays = agg_arrays
                     current_state = arrays.to_torch_state_dict()
-                    direction_variation = compute_direction_variation(
+                    direction_similarity = compute_direction_similarity(
                         current_state,
                         previous_lora_state,
                     )
                     previous_lora_state = extract_lora_state(current_state)
-                    if direction_variation is not None:
+                    if direction_similarity is not None:
                         wandb.log(
-                            {"direction_variation": direction_variation},
+                            {"direction_similarity": direction_similarity},
                             step=current_round,
                         )
                 if agg_train_metrics is not None:
