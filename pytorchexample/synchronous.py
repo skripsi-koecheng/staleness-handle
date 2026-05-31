@@ -289,11 +289,13 @@ class _SynchronousBase:
                         # Log to W&B
                         wandb.log(dict(res), step=current_round)
                         accuracy = get_top1_test_accuracy(res)
-                        if accuracy is not None and accuracy > peak_accuracy:
-                            peak_accuracy = accuracy
-                            wandb.run.summary["peak_top1_test_accuracy"] = accuracy
-                            wandb.run.summary["peak_accuracy_step"] = current_round
-                            wandb.run.summary["peak_accuracy_wall_clock_seconds"] = time.time() - t_start
+                        if accuracy is not None:
+                            if accuracy > peak_accuracy:
+                                peak_accuracy = accuracy
+                                wandb.run.summary["peak_top1_test_accuracy"] = accuracy
+                                wandb.run.summary["peak_accuracy_step"] = current_round
+                                wandb.run.summary["peak_accuracy_wall_clock_seconds"] = time.time() - t_start
+                            wandb.log({"peak_top1_test_accuracy": peak_accuracy}, step=current_round)
                         if accuracy is not None and accuracy >= target_accuracy:
                             if not target_logged:
                                 target_logged = True

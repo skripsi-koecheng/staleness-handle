@@ -553,11 +553,13 @@ class AsyncFedAvgStrategy(FedAvg):
                             result.evaluate_metrics_serverapp[updates_done] = eval_res
                             wandb.log(dict(eval_res), step=updates_done)
                             accuracy = get_top1_test_accuracy(eval_res)
-                            if accuracy is not None and accuracy > peak_accuracy:
-                                peak_accuracy = accuracy
-                                wandb.run.summary["peak_top1_test_accuracy"] = accuracy
-                                wandb.run.summary["peak_accuracy_step"] = updates_done
-                                wandb.run.summary["peak_accuracy_wall_clock_seconds"] = time.time() - t_start
+                            if accuracy is not None:
+                                if accuracy > peak_accuracy:
+                                    peak_accuracy = accuracy
+                                    wandb.run.summary["peak_top1_test_accuracy"] = accuracy
+                                    wandb.run.summary["peak_accuracy_step"] = updates_done
+                                    wandb.run.summary["peak_accuracy_wall_clock_seconds"] = time.time() - t_start
+                                wandb.log({"peak_top1_test_accuracy": peak_accuracy}, step=updates_done)
                             if accuracy is not None and accuracy >= target_accuracy:
                                 if not target_logged:
                                     target_logged = True
