@@ -283,7 +283,9 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
 
         import random
 
-        selected_node_ids = random.sample(available_node_ids, num_to_sample)
+        selection_seed = int(self.run_config.get("selection-seed", 42))
+        rng = random.Random(selection_seed + int(server_round))
+        selected_node_ids = rng.sample(sorted(available_node_ids), num_to_sample)
 
         config["server-round"] = server_round
         record = RecordDict({self.arrayrecord_key: arrays,
@@ -496,6 +498,30 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                     )
 
                     if len(buffered_replies) >= self.async_buffer_size:
+                        _id_to_tier_comp = {0: "fast", 1: "medium", 2: "slow"}
+                        _tier_counts: dict[str, int] = {"fast": 0, "medium": 0, "slow": 0}
+                        _buf_taus: list[int] = []
+                        _buf_weights: list[float] = []
+                        for _br, _bt, _be in buffered_replies:
+                            _buf_taus.append(_bt)
+                            _buf_weights.append(_be)
+                            _br_content = _br.content.get("metrics") if _br.has_content() else None
+                            if _br_content is not None:
+                                _tid = int(_br_content.get("straggler_tier_id", -1))
+                                _tlabel = _id_to_tier_comp.get(_tid, "")
+                                if _tlabel:
+                                    _tier_counts[_tlabel] += 1
+                        _buf_comp_log: dict = {
+                            "buffer_fast_count": _tier_counts["fast"],
+                            "buffer_medium_count": _tier_counts["medium"],
+                            "buffer_slow_count": _tier_counts["slow"],
+                            "buffer_min_tau": min(_buf_taus) if _buf_taus else 0,
+                            "buffer_max_tau": max(_buf_taus) if _buf_taus else 0,
+                            "buffer_mean_tau": sum(_buf_taus) / len(_buf_taus) if _buf_taus else 0.0,
+                        }
+                        if _buf_weights:
+                            _buf_comp_log["buffer_mean_staleness_weight"] = sum(_buf_weights) / len(_buf_weights)
+
                         agg_arrays, agg_metrics, consumed = self._aggregate_buffered_replies(
                             buffered_replies)
                         buffered_replies = []
@@ -534,6 +560,7 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                             if direction_similarity is not None:
                                 log_dict["direction_similarity"] = direction_similarity
                             wandb.log(log_dict, step=global_updates_done)
+                            wandb.log(_buf_comp_log, step=global_updates_done)
                             log(
                                 INFO,
                                 "[ASYNC-BUFFERED AGG %s/%s] applied buffered FedAvg with %s replies",
@@ -552,7 +579,7 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                                 }
                                 for tier_name, tier_taus in tau_by_tier.items():
                                     if tier_taus:
-                                        staleness_log[f"staleness/tau_{tier_name.lower()}"] = statistics.mean(tier_taus)
+                                        staleness_log[f"staleness/mean_tau_{tier_name.lower()}"] = statistics.mean(tier_taus)
                                 wandb.log(staleness_log, step=global_updates_done)
 
                             if evaluate_fn is not None and global_updates_done % evaluation_interval == 0:

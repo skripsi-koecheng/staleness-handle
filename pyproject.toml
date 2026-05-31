@@ -66,3 +66,4 @@ dirichlet-alpha = 0.25
 fast-delay-seconds = 0.0
 medium-delay-seconds = 10.0
 slow-delay-seconds = 20.0
+selection-seed = 42
