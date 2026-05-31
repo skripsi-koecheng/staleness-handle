@@ -191,6 +191,10 @@ class AsyncFedAvgStrategy(FedAvg):
         if num_examples <= 0:
             return None, current_total_weight, None
 
+        client_metrics = MetricRecord(
+            {**dict(client_metrics), "num_examples_raw": num_examples}
+        )
+
         effective_weight, staleness_boost = self._compute_effective_weight(
             node_id=node_id,
             tau=tau,

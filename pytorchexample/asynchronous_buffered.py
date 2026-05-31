@@ -149,9 +149,9 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
         if not buffered_replies:
             return None, None, 0
 
-        # valid_updates: (client_arrays, client_metrics, effective_weight, expected_staleness, fairness_boost)
+        # valid_updates: (client_arrays, client_metrics, effective_weight, expected_staleness, fairness_boost, raw_num_examples)
         valid_updates: list[tuple[ArrayRecord,
-                                  MetricRecord, float, float, float]] = []
+                      MetricRecord, float, float, float, float]] = []
         valid_taus: list[int] = []
         for reply, tau, expected_staleness in buffered_replies:
             client_arrays, client_metrics, num_examples = self._extract_train_reply(
@@ -174,18 +174,20 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                     fairness_boost = 1.0
                     effective_weight = num_examples
                 valid_updates.append(
-                    (client_arrays, client_metrics, effective_weight, expected_staleness, fairness_boost))
+                    (client_arrays, client_metrics, effective_weight, expected_staleness, fairness_boost, num_examples))
                 valid_taus.append(tau)
 
         if not valid_updates:
             return None, None, 0
 
-        total_weight = sum(w for _, _, w, _, _ in valid_updates)
+        total_weight = sum(w for _, _, w, _, _, _ in valid_updates)
         if total_weight <= 0:
             return None, None, 0
 
+        raw_total = sum(raw for _, _, _, _, _, raw in valid_updates)
+
         aggregated_state: Optional[dict[str, torch.Tensor]] = None
-        for client_arrays, _, client_weight, _, _ in valid_updates:
+        for client_arrays, _, client_weight, _, _, _ in valid_updates:
             client_state = client_arrays.to_torch_state_dict()
             if aggregated_state is None:
                 aggregated_state = {
@@ -210,21 +212,22 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
             return None, None, 0
 
         weighted_train_loss = 0.0
-        for _, client_metrics, client_weight, _, _ in valid_updates:
+        for _, client_metrics, client_weight, _, _, _ in valid_updates:
             weighted_train_loss += float(
                 client_metrics.get("train_loss", 0.0)) * client_weight
 
         metrics_dict: dict = {
             "train_loss": weighted_train_loss / total_weight,
             self.weighted_by_key: total_weight,
+            "num_examples_raw": raw_total,
             "buffer_size": len(valid_updates),
             "avg_tau": sum(valid_taus) / len(valid_taus),
         }
         if self.staleness_weighting_enabled:
             metrics_dict["avg_expected_staleness"] = sum(
-                t for _, _, _, t, _ in valid_updates) / len(valid_updates)
+                t for _, _, _, t, _, _ in valid_updates) / len(valid_updates)
             metrics_dict["avg_staleness_weight"] = sum(
-                sw for _, _, _, _, sw in valid_updates) / len(valid_updates)
+                sw for _, _, _, _, sw, _ in valid_updates) / len(valid_updates)
 
         _scalar_keys = [
             "communication_bytes",
@@ -238,7 +241,7 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
         for key in _scalar_keys:
             values = [
                 float(m.get(key))
-                for _, m, _, _, _ in valid_updates
+                for _, m, _, _, _, _ in valid_updates
                 if m.get(key) is not None
             ]
             if values:
