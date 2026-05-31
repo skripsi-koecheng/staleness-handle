@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$0")/../.."
+
+# fast_dominant: most clients are fast, only 2/16 are slow.
+# This stresses FedStaleWeight more because slow clients are rare
+# and consistently stale — the scenario where fairness compensation matters most.
+
+echo "============================================================"
+echo "Buff 1/2: Async Buffered + LoRA, Unweighted, Fast Dominant (Non-IID, Additive)"
+echo "============================================================"
+./run.sh async "num-server-rounds=50 stop-mode='num_rounds' target-accuracy=0.5 fraction-train=0.025 fraction-evaluate=0.05 local-epochs=1 learning-rate=0.0005 batch-size=32 min-train-nodes=16 min-evaluate-nodes=16 min-available-nodes=16 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 use-lora=true async-strategy='buffered' async-buffer-size=8 async-max-in-flight=16 async-evaluate-interval=1 train-timeout-seconds=600.0 reply-poll-interval-seconds=2.0 straggler-enabled=true baseline-mode='additive' fast-delay-seconds=0.0 medium-delay-seconds=20.0 slow-delay-seconds=40.0 straggler-scenario='fast_dominant' staleness-weighting-enabled=false dirichlet-alpha=0.5 selection-seed=42 wandb-run-name='rtx-buff8-unweighted-fast-noniid-alpha05-lr5e4-seed42'"
+
+echo "============================================================"
+echo "Buff 2/2: Async Buffered + LoRA, FedStaleWeight, Fast Dominant (Non-IID, Additive)"
+echo "============================================================"
+./run.sh async "num-server-rounds=50 stop-mode='num_rounds' target-accuracy=0.5 fraction-train=0.025 fraction-evaluate=0.05 local-epochs=1 learning-rate=0.0005 batch-size=32 min-train-nodes=16 min-evaluate-nodes=16 min-available-nodes=16 weight-decay=0.01 warmup-ratio=0.1 max-grad-norm=1.0 use-lora=true async-strategy='buffered' async-buffer-size=8 async-max-in-flight=16 async-evaluate-interval=1 train-timeout-seconds=600.0 reply-poll-interval-seconds=2.0 straggler-enabled=true baseline-mode='additive' fast-delay-seconds=0.0 medium-delay-seconds=20.0 slow-delay-seconds=40.0 straggler-scenario='fast_dominant' staleness-weighting-enabled=true staleness-weighting-mode='fedstaleweight' fedstaleweight-ema-beta=0.9 dirichlet-alpha=0.5 selection-seed=42 wandb-run-name='rtx-buff8-fsw-fast-noniid-alpha05-lr5e4-seed42'"
+
+echo "============================================================"
+echo "All buff8 FSW non-IID runs completed (2/2)."
+echo "============================================================"
