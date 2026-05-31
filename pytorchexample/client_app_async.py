@@ -113,11 +113,12 @@ def train(msg: Message, context: Context):
             sim.total_effective_time,
         )
 
+        _tier_to_id = {"FAST": 0, "MEDIUM": 1, "SLOW": 2}
         straggler_metrics = {
             "straggler_multiplier": sim.multiplier,
             "straggler_sleep_seconds": sim.sleep_duration,
             "straggler_total_effective_time": sim.total_effective_time,
-            "straggler_tier": sim.tier,
+            "straggler_tier_id": float(_tier_to_id.get(sim.tier, -1)),
         }
 
         if sim.sleep_duration > 0:

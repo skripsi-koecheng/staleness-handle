@@ -474,7 +474,8 @@ class AsyncBufferedFedAvgStrategy(FedAvg):
                     buffered_replies.append((reply, tau, expected_staleness))
 
                     tau_history.append(tau)
-                    tier_label = str(client_metrics.get("straggler_tier", "")).upper()
+                    _id_to_tier = {0: "FAST", 1: "MEDIUM", 2: "SLOW"}
+                    tier_label = _id_to_tier.get(int(client_metrics.get("straggler_tier_id", -1)), "")
                     if tier_label in tau_by_tier:
                         tau_by_tier[tier_label].append(tau)
                     _norm = compute_lora_update_norm(

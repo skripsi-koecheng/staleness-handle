@@ -504,7 +504,8 @@ class AsyncFedAvgStrategy(FedAvg):
                     last_update_time = now
 
                     tau_history.append(tau)
-                    tier_label = str(train_metrics.get("straggler_tier", "")).upper()
+                    _id_to_tier = {0: "FAST", 1: "MEDIUM", 2: "SLOW"}
+                    tier_label = _id_to_tier.get(int(train_metrics.get("straggler_tier_id", -1)), "")
                     if tier_label in tau_by_tier:
                         tau_by_tier[tier_label].append(tau)
 
