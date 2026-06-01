@@ -6,7 +6,7 @@ from flwr.serverapp import Grid, ServerApp
 from pytorchexample.asynchronous import AsyncFedAvgStrategy
 from pytorchexample.asynchronous_buffered import AsyncBufferedFedAvgStrategy
 from pytorchexample.task import (
-    DistilBertAgNewsClassifier,
+    DistilBertYelpClassifier,
     global_evaluate,
     set_global_seed,
     set_max_length,
@@ -79,7 +79,7 @@ def main(grid: Grid, context: Context) -> None:
     set_global_seed(GLOBAL_MODEL_SEED)
     set_max_length(int(context.run_config.get("max-length", MAX_LENGTH)))
     set_use_lora(use_lora)
-    global_model = DistilBertAgNewsClassifier(use_lora=use_lora)
+    global_model = DistilBertYelpClassifier(use_lora=use_lora)
     arrays = ArrayRecord(global_model.get_federated_state_dict())
 
     if async_strategy in {"buffered", "buffer"}:

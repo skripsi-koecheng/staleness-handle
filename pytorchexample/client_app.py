@@ -10,7 +10,7 @@ from flwr.common import log
 
 from pytorchexample.straggler import compute_straggler, describe_tier_mapping
 from pytorchexample.task import (
-    DistilBertAgNewsClassifier,
+    DistilBertYelpClassifier,
     get_state_dict_bytes,
     get_state_dict_numel,
     load_data,
@@ -36,7 +36,7 @@ def train(msg: Message, context: Context):
     set_global_seed(GLOBAL_MODEL_SEED + partition_id)
     set_max_length(int(context.run_config.get("max-length", MAX_LENGTH)))
     use_lora = bool(context.run_config.get("use-lora", True))
-    model = DistilBertAgNewsClassifier(use_lora=use_lora)
+    model = DistilBertYelpClassifier(use_lora=use_lora)
     model.load_federated_state_dict(
         msg.content["arrays"].to_torch_state_dict())
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -174,7 +174,7 @@ def evaluate(msg: Message, context: Context):
     set_global_seed(GLOBAL_MODEL_SEED + partition_id)
     set_max_length(int(context.run_config.get("max-length", MAX_LENGTH)))
     use_lora = bool(context.run_config.get("use-lora", True))
-    model = DistilBertAgNewsClassifier(use_lora=use_lora)
+    model = DistilBertYelpClassifier(use_lora=use_lora)
     model.load_federated_state_dict(
         msg.content["arrays"].to_torch_state_dict())
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")

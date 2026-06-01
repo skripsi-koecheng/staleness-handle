@@ -99,7 +99,7 @@ def get_state_dict_bytes(state_dict: dict[str, torch.Tensor]) -> int:
     return _state_dict_bytes(state_dict)
 
 
-class DistilBertAgNewsClassifier(nn.Module):
+class DistilBertYelpClassifier(nn.Module):
     """DistilBERT + LoRA adapter for text classification."""
 
     def __init__(self, use_lora: Optional[bool] = None):
@@ -432,7 +432,7 @@ def compute_lora_update_norm(
 def global_evaluate(server_round: int, arrays: ArrayRecord) -> MetricRecord:
     """Evaluate model on centralized DBpedia-14 test data."""
     set_global_seed(GLOBAL_MODEL_SEED)
-    model = DistilBertAgNewsClassifier()
+    model = DistilBertYelpClassifier()
     model.load_federated_state_dict(arrays.to_torch_state_dict())
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model.to(device)
